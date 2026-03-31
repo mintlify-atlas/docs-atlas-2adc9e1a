@@ -1,0 +1,143 @@
+---
+title: "Running on Windows"
+description: "Windows-specific setup required to run Sparkling Water, including winutils, environment variables, and the Hive scratch directory."
+keywords: ["windows", "winutils", "HADOOP_HOME", "SPARK_HOME", "sparkling-shell", "setup"]
+---
+
+Running Spark and Sparkling Water on Windows requires a few extra steps beyond a standard Unix installation. The primary requirement is providing `winutils.exe`, which Spark uses to emulate Hadoop filesystem operations on Windows.
+
+<Warning>
+Sparkling Water on Windows requires a 64-bit JDK. Ensure `JAVA_HOME` points to a 64-bit JRE/JDK and that `java` is on your `PATH`.
+</Warning>
+
+## Setup
+
+<Steps>
+  <Step title="Download Spark">
+    Download the appropriate Spark distribution from the [Spark Downloads page](https://spark.apache.org/downloads.html). Choose a pre-built package matching the Hadoop version you intend to use.
+  </Step>
+  <Step title="Set SPARK_HOME">
+    Open a Command Prompt or PowerShell window and set the `SPARK_HOME` environment variable to the location of your extracted Spark distribution:
+
+    ```bat
+    SET SPARK_HOME=<location of your downloaded Spark distribution>
+    ```
+
+    For a permanent setting, add `SPARK_HOME` to your system environment variables via **Control Panel → System → Advanced system settings → Environment Variables**.
+  </Step>
+  <Step title="Download winutils.exe">
+    Spark on Windows requires `winutils.exe` to provide a minimal Hadoop binary. Download the correct version for the Hadoop release bundled with your Spark distribution from:
+
+    [https://github.com/steveloughran/winutils](https://github.com/steveloughran/winutils)
+
+    For example, if you downloaded `spark-<version>-bin-hadoop2.7.tgz`, you need `winutils.exe` for Hadoop 2.7.
+
+    <Warning>
+    Using a `winutils.exe` built for the wrong Hadoop version will cause errors at runtime. Match the Hadoop version exactly.
+    </Warning>
+  </Step>
+  <Step title="Place winutils.exe and set HADOOP_HOME">
+    Create a new directory `%SPARK_HOME%\hadoop\bin` and move `winutils.exe` into it:
+
+    ```bat
+    mkdir %SPARK_HOME%\hadoop\bin
+    move C:\path\to\winutils.exe %SPARK_HOME%\hadoop\bin\
+    ```
+
+    Then set `HADOOP_HOME`:
+
+    ```bat
+    SET HADOOP_HOME=%SPARK_HOME%\hadoop
+    ```
+  </Step>
+  <Step title="Create the Hive scratch directory configuration">
+    Create a new file at `%SPARK_HOME%\hadoop\conf\hive-site.xml` to configure the Hive scratch directory. Use a writable temporary directory such as `%TEMP%\hive`:
+
+    ```xml
+    <configuration>
+      <property>
+        <name>hive.exec.scratchdir</name>
+        <value>PUT HERE LOCATION OF TEMP FOLDER</value>
+        <description>Scratch space for Hive jobs</description>
+      </property>
+    </configuration>
+    ```
+
+    <Note>
+    Alternatively, you can use the Hive default scratch directory `C:\tmp\hive`. In that case, create the directory manually and set permissions with:
+
+    ```bat
+    %HADOOP_HOME%\bin\winutils.exe chmod -R 777 C:\tmp\hive
+    ```
+    </Note>
+  </Step>
+  <Step title="Set HADOOP_CONF_DIR">
+    Point Spark to the Hadoop configuration directory you just created:
+
+    ```bat
+    SET HADOOP_CONF_DIR=%SPARK_HOME%\hadoop\conf
+    ```
+  </Step>
+  <Step title="Run the Sparkling Water shell">
+    Navigate to your Sparkling Water directory and launch the shell using the Windows batch script:
+
+    ```bat
+    bin\sparkling-shell.cmd
+    ```
+
+    Once the shell starts, initialize `H2OContext`:
+
+    ```scala
+    import ai.h2o.sparkling._
+    val hc = H2OContext.getOrCreate()
+    ```
+  </Step>
+</Steps>
+
+## Environment variable summary
+
+| Variable | Example value | Purpose |
+|----------|---------------|---------|
+| `JAVA_HOME` | `C:\Program Files\Java\jdk1.8.0_301` | Points to a 64-bit JDK installation |
+| `SPARK_HOME` | `C:\spark-3.3.0-bin-hadoop3` | Root of the Spark distribution |
+| `HADOOP_HOME` | `%SPARK_HOME%\hadoop` | Location of `winutils.exe` and Hadoop stubs |
+| `HADOOP_CONF_DIR` | `%SPARK_HOME%\hadoop\conf` | Location of `hive-site.xml` |
+
+## Common issues
+
+<AccordionGroup>
+  <Accordion title="Error: Could not find or load main class">
+    This usually means `SPARK_HOME` is not set or points to the wrong directory. Verify with:
+
+    ```bat
+    echo %SPARK_HOME%
+    dir %SPARK_HOME%\bin
+    ```
+  </Accordion>
+  <Accordion title="java.io.IOException: Failed to create a temp directory">
+    Spark could not create a temporary directory. Ensure `%TEMP%` exists and is writable. If you configured a custom `hive.exec.scratchdir`, verify the path exists and is writable.
+  </Accordion>
+  <Accordion title="NullPointerException or errors related to winutils.exe">
+    `winutils.exe` is missing, in the wrong directory, or is the wrong version for your Hadoop release. Confirm:
+
+    1. `winutils.exe` is at `%HADOOP_HOME%\bin\winutils.exe`
+    2. `HADOOP_HOME` is set correctly
+    3. The Hadoop version of `winutils.exe` matches the Hadoop version in your Spark distribution name (e.g., `hadoop2.7`, `hadoop3`)
+  </Accordion>
+  <Accordion title="Spark is slow to initialize or H2O does not form a cluster">
+    Set `SPARK_LOCAL_IP` to force Spark to bind to a specific interface:
+
+    ```bat
+    SET SPARK_LOCAL_IP=127.0.0.1
+    ```
+  </Accordion>
+  <Accordion title="Permission errors on the Hive scratch directory">
+    Run the following command to set the correct permissions using `winutils.exe`:
+
+    ```bat
+    %HADOOP_HOME%\bin\winutils.exe chmod -R 777 C:\tmp\hive
+    ```
+
+    If using a custom scratch directory, replace `C:\tmp\hive` with your configured path.
+  </Accordion>
+</AccordionGroup>

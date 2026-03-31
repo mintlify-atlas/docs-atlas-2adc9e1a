@@ -1,0 +1,416 @@
+---
+title: "RSparkling Quickstart"
+description: "Connect to Spark from R, create an H2OContext, and train your first model using RSparkling in a few steps."
+keywords: ["rsparkling", "sparklyr", "h2o", "quickstart", "GBM", "machine learning", "R"]
+---
+
+This guide walks you through a complete RSparkling workflow — from installing packages to training and evaluating an H2O model. The example uses the built-in `mtcars` dataset and trains a Gradient Boosting Machine (GBM) to predict fuel efficiency (`mpg`).
+
+<Note>
+Before starting, confirm that your RSparkling, Spark, and H2O versions are compatible. See the [RSparkling Overview](/rsparkling/overview) for version compatibility details and installation instructions.
+</Note>
+
+## Complete workflow
+
+<Tabs>
+  <Tab title="Local">
+
+<Steps>
+  <Step title="Install required packages">
+    If you have not already installed the required packages, do so now. See the [RSparkling Overview](/rsparkling/overview) for the full installation procedure including H2O version pinning.
+
+    ```r
+    install.packages("sparklyr")
+
+    library(sparklyr)
+    spark_install(version = "3.3")
+
+    # Install H2O (use the exact version required by your RSparkling release)
+    install.packages(
+      "h2o",
+      type  = "source",
+      repos = "http://h2o-release.s3.amazonaws.com/h2o/rel-{H2O_RELEASE_NAME}/{H2O_BUILD_NUMBER}/R"
+    )
+
+    # Install RSparkling
+    install.packages(
+      "rsparkling",
+      type  = "source",
+      repos = "http://h2o-release.s3.amazonaws.com/sparkling-water/spark-{SPARK_MAJOR}/{SW_VERSION}/R"
+    )
+    ```
+  </Step>
+
+  <Step title="Load libraries and connect to Spark">
+    Load `rsparkling` before calling `spark_connect`. This registers the Sparkling Water extension automatically.
+
+    ```r
+    library(rsparkling)
+    library(sparklyr)
+    library(h2o)
+
+    sc <- spark_connect(master = "local", version = "3.3")
+    ```
+
+    <Tip>
+    If `SPARK_HOME` is set in your environment and you want to use that existing Spark installation rather than a sparklyr-managed one, omit the `version` argument:
+
+    ```r
+    sc <- spark_connect(master = "local")
+    ```
+    </Tip>
+  </Step>
+
+  <Step title="Configure and create H2OContext">
+    Optionally create an `H2OConf` object to customize the H2O cluster settings before starting it. Then call `H2OContext.getOrCreate()` to launch H2O on top of Spark.
+
+    ```r
+    # Optional: customize H2O configuration
+    h2oConf <- H2OConf()
+    h2oConf$setBasePort(55555)
+
+    # Create the H2OContext
+    hc <- H2OContext.getOrCreate(h2oConf)
+    ```
+
+    You can also set configuration properties by name:
+
+    ```r
+    h2oConf$set("spark.ext.h2o.cloud.name", "mycloud")
+    ```
+
+    <Note>
+    If you do not need to customize H2O settings, you can call `H2OContext.getOrCreate()` without arguments.
+    </Note>
+  </Step>
+
+  <Step title="Open H2O Flow (optional)">
+    H2O Flow is a browser-based UI for exploring data, running models interactively, and inspecting results. Open it directly from R:
+
+    ```r
+    hc$openFlow()
+    ```
+
+    The URL is also printed to the console when `H2OContext` starts. On Databricks Azure, Flow is available on port `9009` by default, configurable via `spark.ext.h2o.client.web.port`.
+  </Step>
+
+  <Step title="Load data as a Spark DataFrame">
+    Copy a local R data frame to Spark using `dplyr`'s `copy_to`. This makes the data available as a distributed Spark DataFrame.
+
+    ```r
+    library(dplyr)
+
+    mtcars_tbl <- copy_to(sc, mtcars, overwrite = TRUE)
+    mtcars_tbl
+    ```
+
+    ```
+    ## Source:   query [?? x 11]
+    ## Database: spark connection master=local[8] app=sparklyr local=TRUE
+    ##
+    ##      mpg   cyl  disp    hp  drat    wt  qsec    vs    am  gear  carb
+    ##    <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl>
+    ## 1   21.0     6 160.0   110  3.90 2.620 16.46     0     1     4     4
+    ## 2   21.0     6 160.0   110  3.90 2.875 17.02     0     1     4     4
+    ## ...
+    ```
+  </Step>
+
+  <Step title="Convert Spark DataFrame to H2O Frame">
+    Use `hc$asH2OFrame()` to convert the Spark DataFrame into an H2O Frame, which can be passed directly to H2O algorithms.
+
+    ```r
+    mtcars_hf <- hc$asH2OFrame(mtcars_tbl)
+    mtcars_hf
+    ```
+
+    ```
+    ## <jobj[103]>
+    ##   class water.fvec.H2OFrame
+    ##   Frame frame_rdd_39 (32 rows and 11 cols):
+    ##                        mpg  cyl   disp   hp  ...
+    ##     min               10.4    4   71.1   52  ...
+    ##    mean          20.090625    6  230.7  146  ...
+    ##  stddev          6.026948    1  123.9   68  ...
+    ##     max               33.9    8  472.0  335  ...
+    ## missing                0.0    0    0.0    0  ...
+    ```
+  </Step>
+
+  <Step title="Prepare data for modeling">
+    Define the response variable and predictor set, then split the H2O Frame into training and test sets.
+
+    ```r
+    # Define response and predictors
+    y <- "mpg"
+    x <- setdiff(names(mtcars_hf), y)
+
+    # 70/30 train-test split
+    splits <- h2o.splitFrame(mtcars_hf, ratios = 0.7, seed = 1)
+    ```
+  </Step>
+
+  <Step title="Train an H2O GBM model">
+    Train a Gradient Boosting Machine using the H2O training Frame.
+
+    ```r
+    fit <- h2o.gbm(
+      x              = x,
+      y              = y,
+      training_frame = splits[[1]],
+      min_rows       = 1,
+      seed           = 1
+    )
+    print(fit)
+    ```
+
+    ```
+    ## H2ORegressionModel: gbm
+    ## Model ID:  GBM_model_R_1474763476171_1
+    ##
+    ## H2ORegressionMetrics: gbm
+    ## ** Reported on training data. **
+    ##
+    ## MSE:  0.001211724
+    ## RMSE:  0.03480983
+    ## MAE:  0.02761402
+    ## RMSLE:  0.001929304
+    ## Mean Residual Deviance :  0.001211724
+    ```
+  </Step>
+
+  <Step title="Evaluate model performance">
+    Evaluate model quality on the held-out test set.
+
+    ```r
+    perf <- h2o.performance(fit, newdata = splits[[2]])
+    print(perf)
+    ```
+
+    ```
+    ## H2ORegressionMetrics: gbm
+    ##
+    ## MSE:  2.707001
+    ## RMSE:  1.645297
+    ## MAE:  1.455267
+    ## RMSLE:  0.08579109
+    ## Mean Residual Deviance :  2.707001
+    ```
+  </Step>
+
+  <Step title="Generate predictions and convert back to Spark">
+    Generate predictions as an H2O Frame, then convert back to a Spark DataFrame if needed for downstream Spark operations.
+
+    ```r
+    # Predict on the test set (returns an H2OFrame)
+    pred_hf <- h2o.predict(fit, newdata = splits[[2]])
+    head(pred_hf)
+    ```
+
+    ```
+    ##   predict
+    ## 1 21.39512
+    ## 2 16.92804
+    ## 3 15.19558
+    ## 4 20.47695
+    ## 5 20.47695
+    ## 6 15.24433
+    ```
+
+    ```r
+    # Convert H2OFrame back to Spark DataFrame
+    pred_sdf <- hc$asSparkFrame(pred_hf)
+    head(pred_sdf)
+    ```
+  </Step>
+
+  <Step title="Disconnect from Spark">
+    When finished, disconnect from Spark. This also stops the H2OContext because it is owned by the Spark shell process.
+
+    ```r
+    spark_disconnect(sc)
+    ```
+  </Step>
+</Steps>
+
+  </Tab>
+  <Tab title="Databricks">
+
+<Steps>
+  <Step title="Create a Databricks cluster">
+    In your Databricks workspace, create a new cluster. Select the Spark version that matches your target RSparkling release (e.g., Spark 3.3 for RSparkling built against Spark 3.3).
+  </Step>
+
+  <Step title="Create an R notebook and install packages">
+    Create a new R notebook and attach it to your cluster. In the first cell, install all required packages:
+
+    ```r
+    # Install sparklyr
+    install.packages("sparklyr")
+
+    # Install H2O (replace with the correct release name and build number)
+    install.packages(
+      "h2o",
+      type  = "source",
+      repos = "http://h2o-release.s3.amazonaws.com/h2o/rel-{H2O_RELEASE_NAME}/{H2O_BUILD_NUMBER}/R"
+    )
+
+    # Install RSparkling (replace with your Spark major version and SW version)
+    install.packages(
+      "rsparkling",
+      type  = "source",
+      repos = "http://h2o-release.s3.amazonaws.com/sparkling-water/spark-{SPARK_MAJOR}/{SW_VERSION}/R"
+    )
+    ```
+  </Step>
+
+  <Step title="Connect to Spark and start H2OContext">
+    On Databricks, use `method = "databricks"` instead of specifying a master URL. This connects to the managed Spark session.
+
+    ```r
+    library(rsparkling)
+    library(sparklyr)
+
+    # Connect to the Databricks-managed Spark session
+    sc <- spark_connect(method = "databricks")
+
+    # Start H2O context
+    hc <- H2OContext.getOrCreate()
+    ```
+
+    After `H2OContext` starts, the H2O Flow URL is printed to the cell output. Flow is accessible on port `9009` by default.
+
+    <Note>
+    If port `9009` is not open in your Azure Databricks environment, configure an available port via `spark.ext.h2o.client.web.port` in `H2OConf` before calling `H2OContext.getOrCreate()`.
+    </Note>
+  </Step>
+
+  <Step title="Run your analysis">
+    From this point, the workflow is identical to local mode. Copy data to Spark, convert to H2O Frames, train models with `h2o.*` functions, and evaluate results.
+
+    ```r
+    library(dplyr)
+    library(h2o)
+
+    mtcars_tbl <- copy_to(sc, mtcars, overwrite = TRUE)
+    mtcars_hf  <- hc$asH2OFrame(mtcars_tbl)
+
+    y      <- "mpg"
+    x      <- setdiff(names(mtcars_hf), y)
+    splits <- h2o.splitFrame(mtcars_hf, ratios = 0.7, seed = 1)
+
+    fit <- h2o.gbm(
+      x              = x,
+      y              = y,
+      training_frame = splits[[1]],
+      min_rows       = 1,
+      seed           = 1
+    )
+    print(fit)
+    ```
+  </Step>
+</Steps>
+
+  </Tab>
+  <Tab title="Windows">
+
+<Steps>
+  <Step title="Set up the Spark environment">
+    Windows requires additional configuration to run Spark. You must have `winutils.exe` available for the Hadoop version bundled with your Spark distribution. The Hadoop version is typically encoded in the Spark download filename (e.g., `spark-3.3.0-bin-hadoop3.tgz` uses Hadoop 3).
+
+    1. Download `winutils.exe` for your Hadoop version from the [winutils repository](https://github.com/steveloughran/winutils).
+    2. Set the `HADOOP_HOME` environment variable to the directory containing `bin\winutils.exe`:
+
+    ```r
+    Sys.setenv(HADOOP_HOME = "C:/hadoop")
+    ```
+
+    <Warning>
+    If `HADOOP_HOME` is not set, `h2o_context()` will fail with a `NullPointerException` from `ProcessBuilder.start`. This is the most common Windows setup error.
+    </Warning>
+  </Step>
+
+  <Step title="Fix Hive temp directory permissions">
+    Spark on Windows may fail when copying data if the `/tmp/hive` directory has insufficient permissions. Fix this by running the following in a command prompt:
+
+    ```batch
+    \path\to\winutils\Winutils.exe chmod 777 \tmp\hive
+    ```
+
+    Alternatively, redirect the Hive scratch directory by creating `%HADOOP_HOME%\conf\hive-site.xml`:
+
+    ```xml
+    <configuration>
+      <property>
+        <name>hive.exec.scratchdir</name>
+        <value>C:/Users/your-user/hive/</value>
+        <description>Scratch space for Hive jobs</description>
+      </property>
+    </configuration>
+    ```
+
+    Then set `HADOOP_CONF_DIR`:
+
+    ```batch
+    SET HADOOP_CONF_DIR=%HADOOP_HOME%\conf
+    ```
+  </Step>
+
+  <Step title="Verify the setup">
+    Use this test script to confirm that Spark connection, H2O initialization, and data copying all work correctly:
+
+    ```r
+    library(sparklyr)
+    library(rsparkling)
+
+    # Connect to local Spark
+    sc <- spark_connect(master = "local", version = "3.3")
+
+    # Create H2O context
+    hc <- H2OContext.getOrCreate()
+
+    # Copy R dataset to Spark
+    library(dplyr)
+    mtcars_tbl <- copy_to(sc, mtcars, overwrite = TRUE)
+    mtcars_tbl
+    ```
+
+    If all three steps succeed without error, your Windows environment is configured correctly.
+
+    <Tip>
+    If `copy_to` still fails after fixing Hive permissions, try deleting the `metastore_db` folder in your R working directory and retrying.
+    </Tip>
+  </Step>
+
+  <Step title="Proceed with the standard workflow">
+    Once the environment is verified, follow the same steps as the local workflow — convert to H2O Frames, train models, and evaluate results.
+  </Step>
+</Steps>
+
+  </Tab>
+</Tabs>
+
+## Viewing Spark logs
+
+You can inspect the Spark log from R at any time during your session:
+
+```r
+spark_log(sc, n = 100)
+```
+
+## Next steps
+
+<Columns cols={2}>
+  <Card title="RSparkling Overview" icon="circle-info" href="/rsparkling/overview">
+    Package architecture, version compatibility, and full installation instructions.
+  </Card>
+  <Card title="H2O algorithm reference" icon="flask" href="http://docs.h2o.ai">
+    Full documentation for GBM, GLM, Deep Learning, AutoML, and other H2O algorithms.
+  </Card>
+  <Card title="Intro to H2O tutorial" icon="graduation-cap" href="https://github.com/h2oai/h2o-tutorials/blob/master/h2o-open-tour-2016/chicago/intro-to-h2o.R">
+    A hands-on R tutorial introducing H2O's core capabilities.
+  </Card>
+  <Card title="Grid search and model selection" icon="sliders" href="https://github.com/h2oai/h2o-tutorials/blob/master/h2o-open-tour-2016/chicago/grid-search-model-selection.R">
+    Learn how to tune hyperparameters and select the best model with H2O.
+  </Card>
+</Columns>

@@ -1,0 +1,120 @@
+---
+title: "Introduction"
+description: "Sparkling Water integrates H2O's fast, scalable machine learning engine with Apache Spark, letting you build end-to-end ML pipelines using Scala, Python, or R."
+---
+
+Sparkling Water allows users to combine the fast, scalable machine learning algorithms of H2O with the capabilities of Apache Spark. With Sparkling Water, you can drive computation from Scala, Python, or R and utilize the H2O Flow UI — providing an ideal machine learning platform for application developers.
+
+Spark is an elegant and powerful general-purpose, open-source, in-memory platform. H2O is an in-memory application for machine learning that is reshaping how people apply math and predictive analytics to their business problems. Integrating these two open-source environments provides a seamless experience: query data with Spark SQL, feed results into H2O to build a model, make predictions, then use the results back in Spark.
+
+<Note>
+  Sparkling Water is licensed under the [Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0).
+</Note>
+
+## What Sparkling Water provides
+
+<CardGroup cols={2}>
+  <Card title="Data structure conversion" icon="arrow-right-arrow-left">
+    Publish Spark RDDs, DataFrames, and Datasets as H2O frames, and convert H2O frames back to Spark data structures — all with minimal data copying.
+  </Card>
+  <Card title="H2O algorithms in Spark ML" icon="brain">
+    Use H2O algorithms (GBM, Deep Learning, AutoML, XGBoost, and more) as Spark ML-compatible estimators and transformers inside your existing Spark pipelines.
+  </Card>
+  <Card title="Multi-language support" icon="code">
+    Build ML applications using Scala, Python via PySparkling, or R via RSparkling. All three languages expose the same core H2OContext and H2OConf APIs.
+  </Card>
+  <Card title="H2O Flow UI" icon="display">
+    Access the H2O Flow web UI directly from your Sparkling Water session to explore data, build models interactively, and inspect model metrics.
+  </Card>
+  <Card title="Internal and external backends" icon="server">
+    Run H2O co-located with Spark executors (internal backend) or connect to a standalone H2O cluster running separately (external backend).
+  </Card>
+  <Card title="MOJO model scoring" icon="bolt">
+    Export trained models as lightweight MOJO artifacts for low-latency, dependency-free scoring without a running H2O cluster.
+  </Card>
+</CardGroup>
+
+## Language interfaces
+
+### Scala (Sparkling Water)
+
+The primary interface uses Scala and integrates directly with the Spark and H2O APIs. Sparkling Water is distributed as a regular Spark application library.
+
+```scala
+import ai.h2o.sparkling._
+val hc = H2OContext.getOrCreate()
+```
+
+### Python (PySparkling)
+
+PySparkling is an integration of Python with Sparkling Water. It allows you to start H2O services on a Spark cluster from the Python API, using Py4J to bridge the JVM. Install a version that matches your Spark version:
+
+```bash
+pip install h2o_pysparkling_3.5
+```
+
+```python
+from pysparkling import H2OContext, H2OConf
+hc = H2OContext.getOrCreate()
+```
+
+### R (RSparkling)
+
+RSparkling is an extension package for [sparklyr](http://spark.rstudio.com) that provides an R front-end for Sparkling Water. It uses sparklyr for Spark job deployment and initialization, then delegates to the `h2o` R package for modeling.
+
+```r
+library(rsparkling)
+sc <- spark_connect(master = "local", version = "3.5")
+hc <- H2OContext.getOrCreate()
+```
+
+## Maven artifacts
+
+Each Sparkling Water release is published to Maven Central. The `{{scala_version}}` placeholder refers to your Scala base version (e.g., `2.12`) and `{{version}}` refers to the Sparkling Water release version.
+
+| Artifact | Purpose |
+|---|---|
+| `ai.h2o:sparkling-water-core_{{scala_version}}:{{version}}` | Core Sparkling Water library |
+| `ai.h2o:sparkling-water-package_{{scala_version}}:{{version}}` | Full package for training and scoring; use with `--packages` |
+| `ai.h2o:sparkling-water-ml_{{scala_version}}:{{version}}` | Extends Spark ML with H2O-based transformations |
+| `ai.h2o:sparkling-water-scoring_{{scala_version}}:{{version}}` | Scoring logic and MOJO model definitions |
+| `ai.h2o:sparkling-water-scoring-package_{{scala_version}}:{{version}}` | Lightweight package for MOJO scoring only |
+| `ai.h2o:sparkling-water-repl_{{scala_version}}:{{version}}` | Spark REPL integration into H2O Flow UI |
+| `ai.h2o:sparkling-water-examples_{{scala_version}}:{{version}}` | Example applications |
+
+<Note>
+  The full list of published artifacts is available on [Maven Central](http://search.maven.org/#search%7Cga%7C1%7Cg%3A%22ai.h2o%22%20AND%20a%3Asparkling-water*).
+</Note>
+
+## PyPI packages
+
+PySparkling packages are versioned by Spark major version. Install the package that matches your Spark installation:
+
+| Package | Spark version |
+|---|---|
+| `h2o_pysparkling_3.5` | Spark 3.5 |
+| `h2o_pysparkling_3.4` | Spark 3.4 |
+| `h2o_pysparkling_3.3` | Spark 3.3 |
+| `h2o_pysparkling_3.2` | Spark 3.2 |
+| `h2o_pysparkling_3.1` | Spark 3.1 |
+| `h2o_pysparkling_3.0` | Spark 3.0 |
+
+## Typical use case
+
+Sparkling Water excels in workflows that combine Spark's data processing strengths with H2O's advanced machine learning algorithms. A typical pattern:
+
+1. Use Spark SQL or DataFrame API to ingest, join, and clean data at scale.
+2. Pass the prepared DataFrame directly to an H2O algorithm (e.g., `H2ODeepLearning`, `H2OGBM`) — no manual format conversion required.
+3. Evaluate the trained model using H2O's built-in metrics.
+4. Use the predictions back in Spark for downstream processing or serving.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get a working ML model running in minutes with Scala or Python.
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Install via Maven, PyPI, Spark packages, or binary download.
+  </Card>
+</CardGroup>

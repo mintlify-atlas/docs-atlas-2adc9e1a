@@ -1,0 +1,216 @@
+---
+title: "Hive Integration"
+description: "Read data from Hive into H2O and write H2O Frames back to Hive using Sparkling Water, including Kerberized cluster support."
+keywords: ["hive", "jdbc", "metastore", "kerberos", "sparkling water", "h2o"]
+---
+
+Sparkling Water can use H2O to read data from Hive tables directly into H2OFrames. This is an alternative to Spark's native Hive support and may be preferred when you want data to land directly in H2O's DKV store without an intermediate Spark stage.
+
+There are two ways to connect: via the **Hive Metastore** (recommended for most setups) and via a **JDBC connection** (required for non-Kerberized or Kerberized Hive over JDBC).
+
+## Import data via Hive Metastore
+
+This approach uses the Hive Metastore configured in your Spark environment. No JDBC driver is required.
+
+**Prerequisites:**
+
+- `$SPARK_HOME/conf` must contain `hive-site.xml` with your Hive configuration.
+- In YARN client mode or any local mode, copy the required metastore connector JARs to `$SPARK_HOME/jars` (e.g., the MySQL JDBC connector if MySQL is your Hive Metastore). This is not required in YARN cluster mode.
+
+<CodeGroup>
+
+```scala Scala
+val airlinesTable = h2oContext.importHiveTable("default", "airlines")
+```
+
+```python Python
+airlines_frame = h2oContext.importHiveTable("default", "airlines")
+```
+
+</CodeGroup>
+
+This reads the `airlines` table from the `default` database into an H2OFrame.
+
+## Import data via JDBC connection
+
+### Obtaining the Hive JDBC client JAR
+
+You need the Hive JDBC standalone JAR on the classpath before making a JDBC connection.
+
+- **Hortonworks (HDP):** `/usr/hdp/current/hive-client/lib/hive-jdbc-<version>-standalone.jar`
+- **Cloudera (CDH):** `/usr/lib/hive/lib/hive-jdbc-<version>-standalone.jar`
+- **Maven:** `mvn dependency:get -Dartifact=groupId:artifactId:version`
+
+### Non-Kerberized Hive
+
+Use this approach when Hive is not secured with Kerberos, including cases where the Hadoop cluster is Kerberized but Hive itself is not.
+
+<CodeGroup>
+
+```scala Scala
+// Start Sparkling Shell with the Hive JDBC JAR
+// ./bin/sparkling-shell --jars /path/to/hive-jdbc-<version>-standalone.jar
+
+import ai.h2o.sparkling._
+val hc = H2OContext.getOrCreate()
+
+val frame = hc.importHiveTable("jdbc:hive2://hostname:10000/default", "airlines")
+```
+
+```python Python
+# Start PySparkling Shell with the Hive JDBC JAR
+# ./bin/pysparkling --jars /path/to/hive-jdbc-<version>-standalone.jar
+
+from pysparkling import *
+hc = H2OContext.getOrCreate()
+
+frame = hc.importHiveTable("jdbc:hive2://hostname:10000/default", "airlines")
+```
+
+</CodeGroup>
+
+### Kerberized Hive in a Kerberized Hadoop cluster
+
+For secured environments, Sparkling Water authenticates using a Hive delegation token. Sparkling Water automatically refreshes the token so it never expires in long-running applications.
+
+<Steps>
+  <Step title="Authenticate with Kerberos">
+    ```bash
+    kinit <your_user_name>
+    ```
+  </Step>
+  <Step title="Put the Hive JDBC JAR on the Hadoop classpath">
+    ```bash
+    export HADOOP_CLASSPATH=/path/to/hive-jdbc-<version>-standalone.jar
+    ```
+  </Step>
+  <Step title="Set the path to the Sparkling Water assembly JAR">
+    ```bash
+    SW_ASSEMBLY=/path/to/sparkling-water-<version>/jars/sparkling-water-assembly_<scala_version>-<sw_version>-all.jar
+    ```
+  </Step>
+  <Step title="Generate the delegation token">
+    The following arguments are required:
+    - `hiveHost` — Full address of HiveServer2, e.g. `hostname:10000`
+    - `hivePrincipal` — HiveServer2 Kerberos principal, e.g. `hive/hostname@DOMAIN.COM`
+    - `tokenFile` — Output file for the delegation token
+
+    ```bash
+    hadoop jar $SW_ASSEMBLY water.hive.GenerateHiveToken \
+      -hiveHost <your_hive_host> \
+      -hivePrincipal <your_hive_principal> \
+      -tokenFile hive.token
+    ```
+  </Step>
+  <Step title="Start Sparkling Water and connect to Kerberized Hive">
+    <CodeGroup>
+
+    ```scala Scala
+    // ./bin/sparkling-shell --jars /path/to/hive-jdbc-<version>-standalone.jar
+
+    import ai.h2o.sparkling._
+    val conf = new H2OConf()
+    conf.setKerberizedHiveEnabled()
+    conf.setHiveHost("hostname:10000")
+    conf.setHivePrincipal("hive/hostname@DOMAIN.COM")
+    // Optional: override the JDBC URL pattern if needed
+    conf.setHiveJdbcUrlPattern("jdbc:hive2://{{host}}/;{{auth}}")
+    val source = scala.io.Source.fromFile("hive.token")
+    try {
+        conf.setHiveToken(source.mkString())
+    } finally {
+        source.close()
+    }
+    val hc = H2OContext.getOrCreate(conf)
+
+    val frame = hc.importHiveTable(
+        "jdbc:hive2://hostname:10000/default;auth=delegationToken",
+        "airlines"
+    )
+    ```
+
+    ```python Python
+    # ./bin/pysparkling --jars /path/to/hive-jdbc-<version>-standalone.jar
+
+    from pysparkling import *
+    conf = H2OConf()
+    conf.setKerberizedHiveEnabled()
+    conf.setHiveHost("hostname:10000")
+    conf.setHivePrincipal("hive/hostname@DOMAIN.COM")
+    # Optional: override the JDBC URL pattern if needed
+    conf.setHiveJdbcUrlPattern("jdbc:hive2://{{host}}/;{{auth}}")
+    with open('hive.token', 'r') as tokenFile:
+        token = tokenFile.read()
+        conf.setHiveToken(token)
+    hc = H2OContext.getOrCreate(conf)
+
+    frame = hc.importHiveTable(
+        "jdbc:hive2://hostname:10000/default;auth=delegationToken",
+        "airlines"
+    )
+    ```
+
+    </CodeGroup>
+  </Step>
+</Steps>
+
+## Configuring the Hive Metastore
+
+If Spark SQL context cannot locate a Hive Metastore, configure `${SPARK_HOME}/conf/hive-site.xml`. Two common backends are MySQL and Derby.
+
+<Tabs>
+  <Tab title="MySQL metastore">
+    Add the following to `${SPARK_HOME}/conf/hive-site.xml`:
+
+    ```xml
+    <property>
+      <name>javax.jdo.option.ConnectionURL</name>
+      <value>jdbc:mysql://{mysql_host}:${mysql_port}/{metastore_db}?createDatabaseIfNotExist=true</value>
+      <description>JDBC connect string for a JDBC metastore</description>
+    </property>
+
+    <property>
+      <name>javax.jdo.option.ConnectionDriverName</name>
+      <value>com.mysql.jdbc.Driver</value>
+      <description>Driver class name for a JDBC metastore</description>
+    </property>
+
+    <property>
+      <name>javax.jdo.option.ConnectionUserName</name>
+      <value>{username}</value>
+      <description>username to use against metastore database</description>
+    </property>
+
+    <property>
+      <name>javax.jdo.option.ConnectionPassword</name>
+      <value>{password}</value>
+      <description>password to use against metastore database</description>
+    </property>
+    ```
+
+    Replace `{mysql_host}`, `{mysql_port}`, `{metastore_db}`, `{username}`, and `{password}` with your values.
+  </Tab>
+  <Tab title="Derby metastore">
+    Add the following to `${SPARK_HOME}/conf/hive-site.xml`:
+
+    ```xml
+    <property>
+      <name>javax.jdo.option.ConnectionURL</name>
+      <value>jdbc:derby://{file_location}/metastore_db;create=true</value>
+      <description>JDBC connect string for a JDBC metastore</description>
+    </property>
+
+    <property>
+      <name>javax.jdo.option.ConnectionDriverName</name>
+      <value>org.apache.derby.jdbc.ClientDriver</value>
+      <description>Driver class name for a JDBC metastore</description>
+    </property>
+    ```
+
+    Replace `{file_location}` with the path to the directory containing the `metastore_db` database file.
+  </Tab>
+</Tabs>
+
+<Warning>
+In YARN client mode and local mode, Sparkling Water requires the metastore connector JARs (e.g. MySQL JDBC driver) to be present in `$SPARK_HOME/jars`. Failure to copy these JARs will result in a metastore connection error at startup. This step is not required in YARN cluster mode.
+</Warning>

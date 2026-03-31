@@ -1,0 +1,265 @@
+---
+title: "FAQ"
+description: "Answers to frequently asked questions about Sparkling Water, covering logging, memory, configuration, connectivity, and platform-specific issues."
+keywords: ["faq", "troubleshooting", "spark logs", "memory", "port", "python", "hive metastore", "kerberos", "yarn"]
+---
+
+## Logging & Debugging
+
+<AccordionGroup>
+  <Accordion title="Where do I find the Spark logs?">
+    The log location depends on the deployment mode:
+
+    **Standalone mode:** Spark executor logs are in `$SPARK_HOME/work/app-<AppName>` (where `<AppName>` is the name of your application). This directory also contains stdout/stderr from H2O.
+
+    **YARN mode:** Executor logs are available via:
+
+    ```bash
+    yarn logs -applicationId <appId>
+    ```
+
+    Driver logs are printed to the console by default. H2O also writes its own logs to `current_dir/h2ologs`. The H2O log location can be overridden with:
+
+    ```bash
+    --conf spark.ext.h2o.log.dir=/path/to/logs
+    ```
+  </Accordion>
+  <Accordion title="How can I display Sparkling Water information in the Spark History Server?">
+    Sparkling Water already reports its information to Spark's event log. You need to add the Sparkling Water classes to the classpath of the Spark History Server. For instructions on configuring Spark to log to the History Server, see the [Spark Monitoring and Instrumentation documentation](http://spark.apache.org/docs/latest/monitoring.html).
+  </Accordion>
+  <Accordion title="How do I change the Sparkling Water log level?">
+    Use the `spark.ext.h2o.log.level` configuration property, or set it programmatically:
+
+    <CodeGroup>
+
+    ```scala Scala
+    import ai.h2o.sparkling._
+    val conf = new H2OConf().setLogLevel("DEBUG")
+    val hc = H2OContext.getOrCreate(conf)
+    ```
+
+    ```python Python
+    from pysparkling import *
+    conf = H2OConf().setLogLevel("DEBUG")
+    hc = H2OContext.getOrCreate(conf)
+    ```
+
+    </CodeGroup>
+
+    To change the Spark log level, edit `$SPARK_HOME/conf/log4j.properties` (copy from the template first):
+
+    ```bash
+    cd $SPARK_HOME/conf
+    cp log4j.properties.template log4j.properties
+    ```
+
+    Then change:
+
+    ```properties
+    log4j.rootCategory=INFO, console
+    ```
+
+    to:
+
+    ```properties
+    log4j.rootCategory=WARN, console
+    ```
+  </Accordion>
+  <Accordion title="How do I change the Sparkling Water log directory?">
+    Set the `spark.ext.h2o.log.dir` property or configure it at runtime:
+
+    <CodeGroup>
+
+    ```scala Scala
+    import ai.h2o.sparkling._
+    val conf = new H2OConf().setLogDir("/path/to/logs")
+    val hc = H2OContext.getOrCreate(conf)
+    ```
+
+    ```python Python
+    from pysparkling import *
+    conf = H2OConf().setLogDir("/path/to/logs")
+    hc = H2OContext.getOrCreate(conf)
+    ```
+
+    </CodeGroup>
+
+    Sparkling Water determines the log directory in this priority order:
+
+    1. `spark.yarn.app.container.log.dir` (used automatically when running on YARN so logs are collected by YARN tooling)
+    2. `spark.ext.h2o.log.dir` (if set and non-empty)
+    3. Default: `${user.dir}/h2ologs/${sparkAppId}`
+  </Accordion>
+  <Accordion title="How do I use Sparkling Shell to launch a Scala script?">
+    Sparkling Shell accepts common Spark Shell arguments. To run a script file, use the `-i` option:
+
+    ```bash
+    bin/sparkling-shell -i test.script
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Performance & Memory
+
+<AccordionGroup>
+  <Accordion title="How do I increase executor memory in Sparkling Shell?">
+    Sparkling Shell accepts standard Spark Shell arguments. Use `spark.executor.memory`:
+
+    ```bash
+    bin/sparkling-shell --conf "spark.executor.memory=4g"
+    ```
+  </Accordion>
+  <Accordion title="How do I increase PermGen size for the Spark driver?">
+    Pass the JVM flag via `spark.driver.extraJavaOptions`:
+
+    ```bash
+    --conf spark.driver.extraJavaOptions="-XX:MaxPermSize=384m"
+    ```
+  </Accordion>
+  <Accordion title="After converting a Spark DataFrame to H2OFrame, I only see 100 columns in the console. Is data being lost?">
+    No data is lost. The full DataFrame is always converted to H2OFrame regardless of column count. Sparkling Water limits the columns sent to the H2O Flow client to 100 by default to keep the console output readable and reduce the data transferred between client and backend.
+
+    To increase the column preview limit, pass the `fullCols` parameter:
+
+    ```python
+    h2o_context.asH2OFrame(dataframe, "Frame_Name", 200)
+    ```
+
+    The third argument controls how many columns are sent to the client for preview.
+  </Accordion>
+  <Accordion title="Spark is very slow during initialization or H2O does not form a cluster. What should I do?">
+    Configure `SPARK_LOCAL_IP` to force Spark to bind to a specific network interface:
+
+    ```bash
+    export SPARK_LOCAL_IP='127.0.0.1'
+    ```
+
+    This is particularly effective when the machine has multiple network interfaces and Spark picks an unreachable one.
+  </Accordion>
+</AccordionGroup>
+
+## Configuration
+
+<AccordionGroup>
+  <Accordion title="How do I change the base port that H2O uses?">
+    Pass `spark.ext.h2o.base.port` via Spark configuration:
+
+    ```bash
+    bin/sparkling-shell --conf "spark.ext.h2o.base.port=13431"
+    ```
+
+    For a complete list of configuration options, see the Sparkling Water configuration properties reference.
+  </Accordion>
+  <Accordion title="How do I change the H2O Flow web UI port?">
+    By default, H2O starts on the client node IP at the first free port starting at `54321`. To specify a custom port:
+
+    ```bash
+    ./bin/sparkling-shell --conf "spark.ext.h2o.client.web.port=443"
+    ```
+  </Accordion>
+  <Accordion title="How do I add Apache Spark classes to the Python path?">
+    Set `PYTHONPATH` before launching PySpark or PySparkling:
+
+    ```bash
+    export PYTHONPATH=$SPARK_HOME/python:$SPARK_HOME/python/build:$PYTHONPATH
+    export PYTHONPATH=$SPARK_HOME/python/lib/py4j-0.9-src.zip:$PYTHONPATH
+    ```
+  </Accordion>
+  <Accordion title="How can I configure the Hive Metastore location?">
+    Add the following to `${SPARK_HOME}/conf/hive-site.xml`.
+
+    **For MySQL:**
+
+    ```xml
+    <property>
+      <name>javax.jdo.option.ConnectionURL</name>
+      <value>jdbc:mysql://{mysql_host}:${mysql_port}/{metastore_db}?createDatabaseIfNotExist=true</value>
+      <description>JDBC connect string for a JDBC metastore</description>
+    </property>
+
+    <property>
+      <name>javax.jdo.option.ConnectionDriverName</name>
+      <value>com.mysql.jdbc.Driver</value>
+      <description>Driver class name for a JDBC metastore</description>
+    </property>
+
+    <property>
+      <name>javax.jdo.option.ConnectionUserName</name>
+      <value>{username}</value>
+      <description>username to use against metastore database</description>
+    </property>
+
+    <property>
+      <name>javax.jdo.option.ConnectionPassword</name>
+      <value>{password}</value>
+      <description>password to use against metastore database</description>
+    </property>
+    ```
+
+    **For Derby:**
+
+    ```xml
+    <property>
+      <name>javax.jdo.option.ConnectionURL</name>
+      <value>jdbc:derby://{file_location}/metastore_db;create=true</value>
+      <description>JDBC connect string for a JDBC metastore</description>
+    </property>
+
+    <property>
+      <name>javax.jdo.option.ConnectionDriverName</name>
+      <value>org.apache.derby.jdbc.ClientDriver</value>
+      <description>Driver class name for a JDBC metastore</description>
+    </property>
+    ```
+
+    Replace `{file_location}` with the path to your Derby metastore directory.
+  </Accordion>
+  <Accordion title="I'm getting a locale error when using a Spark ML stage in a pipeline">
+    If you see `java.lang.reflect.InvocationTargetException` via `java.lang.IllegalArgumentException` about an invalid locale value, set a valid JVM locale for the Spark driver:
+
+    ```bash
+    --conf spark.driver.extraJavaOptions="-Duser.language=en -Duser.country=US"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Connectivity & Networking
+
+<AccordionGroup>
+  <Accordion title="I'm getting a 'missing arguments for method hex' error when importing from the hex package">
+    This occurs on Spark 1.5 and later, which imports SQL functions named `hex` into the Spark Shell environment, causing a naming conflict. Use the fully qualified import with the `_root_` prefix:
+
+    ```scala
+    import _root_.hex.tree.gbm.GBM
+    ```
+  </Accordion>
+  <Accordion title="I'm getting java.lang.NoClassDefFoundError: com/sun/jersey/api/client/config/ClientConfig on HDP YARN">
+    The YARN timeline service is not compatible with libraries provided by Spark. Disable it:
+
+    ```bash
+    --conf spark.hadoop.yarn.timeline-service.enabled=false
+    ```
+
+    For more details, see [SPARK-15343](https://issues.apache.org/jira/browse/SPARK-15343).
+  </Accordion>
+</AccordionGroup>
+
+## Platform-specific
+
+<AccordionGroup>
+  <Accordion title="I'm getting a PySpark version mismatch error when installing PySparkling via pip">
+    If you see:
+
+    ```
+    No matching distribution found for pyspark<=<spark_version>,>=<spark_major_version>.0
+    ```
+
+    The `h2o_pysparkling_<spark_major_version>` package requires the `pyspark` package to be installed separately. Install it from PyPI:
+
+    ```bash
+    pip install pyspark
+    ```
+
+    Then reinstall PySparkling. Make sure the PySpark version you install matches the Spark major version expected by your PySparkling package.
+  </Accordion>
+</AccordionGroup>

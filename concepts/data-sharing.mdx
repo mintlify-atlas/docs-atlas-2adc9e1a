@@ -1,0 +1,254 @@
+---
+title: "Data Sharing"
+description: "How Sparkling Water converts data between Spark DataFrames and H2O H2OFrames, including the copy semantics, zero-copy wrapper, memory considerations, and supported type mappings."
+keywords: ["data sharing", "H2OFrame", "DataFrame", "asH2OFrame", "asSparkFrame", "type mapping", "conversion"]
+---
+
+Sparkling Water enables bidirectional conversion between Spark's `RDD`/`DataFrame` and H2O's `H2OFrame`. The two directions have fundamentally different performance characteristics because of the underlying difference in how each system stores data.
+
+## Why the two directions differ
+
+- **Spark** stores data in a **row-oriented** layout distributed across partitions (blocks). Each row is a contiguous sequence of column values.
+- **H2O** stores data in a **columnar** layout, compressed per-column across all H2O nodes using its Distributed Key/Value (DKV) store.
+
+This layout mismatch determines the cost of each conversion direction.
+
+## Spark to H2O: `asH2OFrame` (data copy)
+
+Converting a Spark `DataFrame` or `RDD` to an `H2OFrame` **requires a full data copy**. Sparkling Water evaluates the lazy Spark computation, reads all rows from the distributed partitions, transposes the data into columnar format, and writes it into H2O's DKV store.
+
+Despite the copy, the resulting `H2OFrame` is stored in a heavily compressed columnar format, so the memory footprint is typically much smaller than the original Spark representation.
+
+<Info>
+Because the copy triggers a Spark action, all upstream Spark transformations are materialized at this point. The operation is not lazy.
+</Info>
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling._
+import org.apache.spark.sql.SparkSession
+
+val spark = SparkSession.builder().appName("Conversion Demo").getOrCreate()
+val hc = H2OContext.getOrCreate()
+
+// Load a Spark DataFrame
+val df = spark.read
+  .option("header", "true")
+  .option("inferSchema", "true")
+  .csv("file:///path/to/data.csv")
+
+// Convert to H2OFrame (triggers a data copy)
+val h2oFrame: H2OFrame = hc.asH2OFrame(df)
+
+// Optionally provide a name for the frame in H2O's DKV store
+val namedFrame: H2OFrame = hc.asH2OFrame(df, "myFrameName")
+```
+
+```python Python
+from pysparkling import *
+from pyspark.sql import SparkSession
+
+spark = SparkSession.builder.appName("Conversion Demo").getOrCreate()
+hc = H2OContext.getOrCreate()
+
+# Load a Spark DataFrame
+df = spark.read \
+  .option("header", "true") \
+  .option("inferSchema", "true") \
+  .csv("file:///path/to/data.csv")
+
+# Convert to H2OFrame (triggers a data copy)
+h2o_frame = hc.asH2OFrame(df)
+
+# Optionally provide a name and limit columns
+h2o_frame = hc.asH2OFrame(df, h2oFrameName="myFrameName", fullCols=-1)
+```
+
+</CodeGroup>
+
+### Python parameters for `asH2OFrame`
+
+| Parameter | Description |
+|---|---|
+| `sparkFrame` | PySpark `DataFrame` or `RDD` to convert |
+| `h2oFrameName` | Optional name for the resulting `H2OFrame` in H2O's DKV store |
+| `fullCols` | Number of first N columns to include; `-1` means all columns |
+
+## H2O to Spark: `asSparkFrame` (zero-copy wrapper)
+
+Converting an `H2OFrame` to a Spark `DataFrame` creates a **lightweight wrapper** around the existing `H2OFrame`. No data is duplicated. The resulting `DataFrame` serves data directly from the underlying `H2OFrame` on read.
+
+<Info>
+Because the Spark `DataFrame` is a wrapper, the data physically remains inside H2O's DKV store. Any Spark action that reads the DataFrame accesses the H2O data directly through the wrapper.
+</Info>
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling._
+
+// h2oFrame is an existing H2OFrame
+val dataFrame = hc.asSparkFrame(h2oFrame)
+
+// The schema is derived from H2OFrame column names and types
+dataFrame.printSchema()
+dataFrame.createOrReplaceTempView("myTable")
+```
+
+```python Python
+from pysparkling import *
+
+# h2o_frame is an existing H2OFrame
+data_frame = hc.asSparkFrame(h2o_frame)
+
+# The schema is derived from H2OFrame column names and types
+data_frame.printSchema()
+data_frame.createOrReplaceTempView("myTable")
+```
+
+</CodeGroup>
+
+## Full conversion example
+
+The following example demonstrates the complete round-trip: load with Spark, process in H2O, return to Spark.
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling._
+import org.apache.spark.sql.SparkSession
+
+val spark = SparkSession.builder().appName("Round-trip Demo").getOrCreate()
+import spark.implicits._
+val hc = H2OContext.getOrCreate()
+
+// Step 1: Load data with Spark SQL
+val crimesDF = spark.read
+  .option("header", "true")
+  .option("inferSchema", "true")
+  .csv("file:///path/to/crimes.csv")
+
+// Step 2: Spark transformation (lazy)
+val filteredDF = crimesDF.filter('Year > 2010)
+
+// Step 3: Convert to H2OFrame — copy happens here
+val crimesHF: H2OFrame = hc.asH2OFrame(filteredDF, "crimeData")
+
+// Step 4: Use H2O algorithms on crimesHF ...
+
+// Step 5: Convert results back to Spark (zero-copy wrapper)
+val resultsDF = hc.asSparkFrame(crimesHF)
+resultsDF.createOrReplaceTempView("crimeResults")
+```
+
+```python Python
+from pysparkling import *
+from pyspark.sql import SparkSession
+
+spark = SparkSession.builder.appName("Round-trip Demo").getOrCreate()
+hc = H2OContext.getOrCreate()
+
+# Step 1: Load data with Spark SQL
+crimes_df = spark.read \
+  .option("header", "true") \
+  .option("inferSchema", "true") \
+  .csv("file:///path/to/crimes.csv")
+
+# Step 2: Spark transformation (lazy)
+filtered_df = crimes_df.filter(crimes_df["Year"] > 2010)
+
+# Step 3: Convert to H2OFrame — copy happens here
+crimes_hf = hc.asH2OFrame(filtered_df, "crimeData")
+
+# Step 4: Use H2O algorithms on crimes_hf ...
+
+# Step 5: Convert results back to Spark (zero-copy wrapper)
+results_df = hc.asSparkFrame(crimes_hf)
+results_df.createOrReplaceTempView("crimeResults")
+```
+
+</CodeGroup>
+
+## Memory considerations
+
+<Tabs>
+  <Tab title="Internal backend">
+    In internal backend mode, H2O-3 shares the JVM with Spark Executors. Both systems compete for the same heap. As a guideline:
+
+    - Allocate enough memory for Spark transformations on the DataFrame (at minimum, the dataset size plus overhead for transformations).
+    - Add an additional **4x the dataset size** for H2O storage.
+
+    <Warning>
+    There is data duplication when converting a Spark DataFrame to an H2OFrame in internal backend mode. H2O's compression reduces the H2O-side footprint, but both representations exist in memory simultaneously during the conversion.
+    </Warning>
+
+    There is **no** data duplication when converting an H2OFrame back to a Spark DataFrame, because Sparkling Water uses a wrapper that reads directly from H2OFrame.
+  </Tab>
+  <Tab title="External backend">
+    In external backend mode, the H2O cluster runs in separate JVMs. Spark and H2O memory do not overlap.
+
+    If you have allocated the recommended memory to your H2O cluster (4x the size of your dataset), you do not need to worry about memory constraints during conversion between a Spark DataFrame and an H2OFrame — there is no collision with Spark storage.
+
+    <Note>
+    The 4x dataset size guideline assumes the dataset is represented as CSV. JSON, XML, or Parquet representations may have significantly different memory requirements.
+    </Note>
+  </Tab>
+</Tabs>
+
+## Supported type mappings
+
+### Spark DataFrame types to H2O vector types
+
+| Scala type | Spark SQL type | H2O type |
+|---|---|---|
+| *(binary)* | `BinaryType` | Numeric |
+| `Byte` | `ByteType` | Numeric |
+| `Short` | `ShortType` | Numeric |
+| `Integer` | `IntegerType` | Numeric |
+| `Long` | `LongType` | Numeric |
+| `Float` | `FloatType` | Numeric |
+| `Double` | `DoubleType` | Numeric |
+| `String` | `StringType` | String or Categorical [^1] |
+| `Boolean` | `BooleanType` | Categorical [^2] |
+| `java.sql.Timestamp` | `TimestampType` | Time |
+
+[^1]: Mapped to String when cardinality exceeds 10,000,000 or the ratio of unique values to all values is 95% or higher; otherwise mapped to Categorical.
+[^2]: Categorical values are `"True"` and `"False"`.
+
+### RDD types supported for conversion
+
+Sparkling Water supports converting `RDD[T]` to `H2OFrame` for the following types `T`:
+
+| Supported RDD element types |
+|---|
+| `Byte` |
+| `Short` |
+| `Integer` |
+| `Long` |
+| `Float` |
+| `Double` |
+| `String` |
+| `Boolean` |
+| `java.sql.Timestamp` |
+| Any Scala class extending `Product` (e.g., case classes) |
+| `org.apache.spark.mllib.regression.LabeledPoint` |
+
+<Tip>
+Support for arbitrary Scala case classes (which extend `Product`) means you can define a typed domain model and convert it directly to an H2OFrame without manually constructing a schema.
+</Tip>
+
+## Supported data formats and sources
+
+Sparkling Water can ingest data in the following formats:
+
+- CSV
+- SVMLight
+- ARFF
+- Parquet
+- ORC
+
+Supported data sources include:
+
+- Standard Spark RDD/DataFrame API (any Spark-compatible source)
+- H2O API direct ingestion from: local files, HDFS, Amazon S3, Google Cloud Storage (GCS)

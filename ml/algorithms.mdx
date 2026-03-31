@@ -1,0 +1,911 @@
+---
+title: 'H2O algorithms'
+description: 'Supervised and unsupervised H2O algorithms available as Spark ML-compatible estimators in Sparkling Water.'
+keywords: ['gbm', 'xgboost', 'drf', 'glm', 'deep learning', 'kmeans', 'isolation forest', 'coxph', 'rulefit', 'stacked ensemble']
+---
+
+All algorithms listed on this page implement the Spark ML `Estimator` interface. Call `.fit(df)` to train and `.transform(df)` to score. The label column type determines whether a classification or regression model is built — string triggers classification, numeric triggers regression — unless you use the explicit `*Classifier` / `*Regressor` subclasses.
+
+<AccordionGroup>
+
+<Accordion title="H2OGBM — Gradient Boosting Machine" id="h2ogbm">
+
+Gradient Boosting Machine builds an ensemble of weak decision trees sequentially. Each tree corrects the residual errors of the ensemble built so far, resulting in strong predictive performance for both classification and regression.
+
+**Key parameters**
+
+| Parameter | Description |
+|---|---|
+| `labelCol` | Name of the target column |
+| `featuresCols` | Columns to use as predictors |
+| `ntrees` | Number of trees to build (default: 50) |
+| `maxDepth` | Maximum tree depth (default: 5) |
+| `learnRate` | Shrinkage factor applied to each tree (default: 0.1) |
+| `nfolds` | Number of cross-validation folds |
+| `keepCrossValidationPredictions` | Retain CV predictions for use in Stacked Ensemble |
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling._
+val hc = H2OContext.getOrCreate()
+
+import org.apache.spark.SparkFiles
+spark.sparkContext.addFile(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/prostate/prostate.csv")
+val rawSparkDF = spark.read.option("header", "true").option("inferSchema", "true")
+  .csv(SparkFiles.get("prostate.csv"))
+val sparkDF = rawSparkDF.withColumn("CAPSULE", $"CAPSULE" cast "string")
+val Array(trainingDF, testingDF) = sparkDF.randomSplit(Array(0.8, 0.2))
+
+import ai.h2o.sparkling.ml.algos.H2OGBM
+val estimator = new H2OGBM()
+  .setLabelCol("CAPSULE")
+  .setNtrees(50)
+  .setMaxDepth(5)
+val model = estimator.fit(trainingDF)
+
+model.transform(testingDF).show(false)
+```
+
+```python Python
+from pysparkling import *
+hc = H2OContext.getOrCreate()
+
+import h2o
+frame = h2o.import_file(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/prostate/prostate.csv")
+sparkDF = hc.asSparkFrame(frame)
+sparkDF = sparkDF.withColumn("CAPSULE", sparkDF.CAPSULE.cast("string"))
+[trainingDF, testingDF] = sparkDF.randomSplit([0.8, 0.2])
+
+from pysparkling.ml import H2OGBM
+estimator = H2OGBM(labelCol="CAPSULE", ntrees=50, maxDepth=5)
+model = estimator.fit(trainingDF)
+
+model.transform(testingDF).show(truncate=False)
+```
+
+</CodeGroup>
+
+</Accordion>
+
+<Accordion title="H2ODRF — Distributed Random Forest" id="h2odrf">
+
+Distributed Random Forest generates a forest of classification or regression trees. Trees are built independently in parallel, each on a random subset of features (`mtries`), which reduces variance and improves generalisation.
+
+**Key parameters**
+
+| Parameter | Description |
+|---|---|
+| `labelCol` | Name of the target column |
+| `featuresCols` | Columns to use as predictors |
+| `ntrees` | Number of trees (default: 50) |
+| `maxDepth` | Maximum tree depth (default: 20) |
+| `mtries` | Features sampled per split; `-1` uses sqrt(features) |
+| `minRows` | Minimum rows in a leaf node |
+| `calibrateModel` | Produce calibrated class probabilities |
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling._
+val hc = H2OContext.getOrCreate()
+
+import org.apache.spark.SparkFiles
+spark.sparkContext.addFile(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/cars_20mpg.csv")
+val sparkDF = spark.read.option("header", "true").option("inferSchema", "true")
+  .csv(SparkFiles.get("cars_20mpg.csv"))
+val Array(trainingDF, testingDF) = sparkDF.randomSplit(Array(0.8, 0.2))
+
+val predictors = Array("displacement", "power", "weight", "acceleration", "year")
+val response = "economy_20mpg"
+
+import ai.h2o.sparkling.ml.algos.H2ODRF
+val estimator = new H2ODRF()
+  .setNtrees(10)
+  .setMaxDepth(5)
+  .setMinRows(10)
+  .setFeaturesCols(predictors)
+  .setLabelCol(response)
+  .setColumnsToCategorical(response)
+val model = estimator.fit(trainingDF)
+
+val metrics = model.getTrainingMetrics()
+println(metrics)
+model.transform(testingDF).show(false)
+```
+
+```python Python
+from pysparkling import *
+hc = H2OContext.getOrCreate()
+
+import h2o
+frame = h2o.import_file(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/cars_20mpg.csv")
+sparkDF = hc.asSparkFrame(frame)
+[trainingDF, testingDF] = sparkDF.randomSplit([0.8, 0.2])
+
+predictors = ["displacement", "power", "weight", "acceleration", "year"]
+response = "economy_20mpg"
+
+from pysparkling.ml import H2ODRF
+estimator = H2ODRF(
+    ntrees=10,
+    maxDepth=5,
+    minRows=10,
+    featuresCols=predictors,
+    labelCol=response,
+    columnsToCategorical=[response])
+model = estimator.fit(trainingDF)
+
+metrics = model.getTrainingMetrics()
+print(metrics)
+model.transform(testingDF).show(truncate=False)
+```
+
+</CodeGroup>
+
+</Accordion>
+
+<Accordion title="H2OGLM — Generalized Linear Model" id="h2oglm">
+
+Generalized Linear Models estimate regression models for outcomes following exponential distributions. Supported distributions include Gaussian, binomial, Poisson, and gamma. Each combination of distribution and link function suits a different prediction or classification task.
+
+**Key parameters**
+
+| Parameter | Description |
+|---|---|
+| `labelCol` | Name of the target column |
+| `featuresCols` | Columns to use as predictors |
+| `family` | Distribution family: `gaussian`, `binomial`, `poisson`, `gamma`, etc. |
+| `lambdaValue` | Regularisation strength (L1/L2) |
+| `computePValues` | Whether to compute p-values for coefficients |
+| `alpha` | Elastic-net mixing parameter (0 = Ridge, 1 = Lasso) |
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling._
+val hc = H2OContext.getOrCreate()
+
+import org.apache.spark.SparkFiles
+spark.sparkContext.addFile(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/prostate/prostate.csv")
+val rawSparkDF = spark.read.option("header", "true").option("inferSchema", "true")
+  .csv(SparkFiles.get("prostate.csv"))
+val sparkDF = rawSparkDF
+  .withColumn("CAPSULE", $"CAPSULE" cast "string")
+  .withColumn("RACE", $"RACE" cast "string")
+  .withColumn("DCAPS", $"DCAPS" cast "string")
+  .withColumn("DPROS", $"DPROS" cast "string")
+val Array(trainingDF, testingDF) = sparkDF.randomSplit(Array(0.8, 0.2))
+
+import ai.h2o.sparkling.ml.algos.H2OGLM
+val estimator = new H2OGLM()
+  .setFamily("binomial")
+  .setFeaturesCols(Array("AGE", "RACE", "VOL", "GLEASON"))
+  .setLabelCol("CAPSULE")
+  .setLambdaValue(Array(0))
+  .setComputePValues(true)
+val model = estimator.fit(trainingDF)
+
+model.getCoefficients().show(truncate = false)
+model.transform(testingDF).show(truncate = false)
+```
+
+```python Python
+from pysparkling import *
+hc = H2OContext.getOrCreate()
+
+import h2o
+frame = h2o.import_file(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/prostate/prostate.csv")
+sparkDF = hc.asSparkFrame(frame)
+sparkDF = sparkDF.withColumn("CAPSULE", sparkDF.CAPSULE.cast("string"))
+sparkDF = sparkDF.withColumn("RACE", sparkDF.RACE.cast("string"))
+sparkDF = sparkDF.withColumn("DCAPS", sparkDF.DCAPS.cast("string"))
+sparkDF = sparkDF.withColumn("DPROS", sparkDF.DPROS.cast("string"))
+[trainingDF, testingDF] = sparkDF.randomSplit([0.8, 0.2])
+
+from pysparkling.ml import H2OGLM
+estimator = H2OGLM(
+    family="binomial",
+    featuresCols=["AGE", "RACE", "VOL", "GLEASON"],
+    labelCol="CAPSULE",
+    computePValues=True,
+    lambdaValue=[0])
+model = estimator.fit(trainingDF)
+
+model.getCoefficients().show(truncate=False)
+model.transform(testingDF).show(truncate=False)
+```
+
+</CodeGroup>
+
+</Accordion>
+
+<Accordion title="H2OGAM — Generalized Additive Model" id="h2ogam">
+
+<Warning>
+H2OGAM is currently experimental.
+</Warning>
+
+A Generalized Additive Model (GAM) extends the Generalized Linear Model by allowing the linear predictor to depend on smooth spline functions of predictor variables in addition to linear terms. This makes it well-suited for capturing non-linear relationships while maintaining interpretability.
+
+**Key parameters**
+
+| Parameter | Description |
+|---|---|
+| `labelCol` | Name of the target column |
+| `featuresCols` | Standard linear predictor columns |
+| `gamCols` | Columns for which smooth spline terms are fitted (required) |
+| `numKnots` | Number of knot points per GAM column |
+| `knotIds` | Optional: H2OFrame IDs containing explicit knot positions |
+| `family` | Distribution family: `gaussian`, `binomial`, `multinomial`, etc. |
+| `scale` | Smoothing parameter array (one per GAM column) |
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling._
+val hc = H2OContext.getOrCreate()
+
+import org.apache.spark.SparkFiles
+val datasetUrl = "https://s3.amazonaws.com/h2o-public-test-data/smalldata/glm_test/multinomial_10_classes_10_cols_10000_Rows_train.csv"
+spark.sparkContext.addFile(datasetUrl)
+val sparkDF = spark.read
+  .option("header", "true")
+  .option("inferSchema", "true")
+  .csv(SparkFiles.get("multinomial_10_classes_10_cols_10000_Rows_train.csv"))
+val Array(trainingDF, testingDF) = sparkDF.randomSplit(Array(0.8, 0.2))
+
+// Create knot frames (define knot positions for each GAM column)
+val knots1 = Seq(-1.99905699, -0.98143075, 0.02599159, 1.00770987, 1.99942290).toDF()
+val frameKnots1 = hc.asH2OFrame(knots1)
+val knots2 = Seq(-1.999821861, -1.005257990, -0.006716042, 1.002197392, 1.999073589).toDF()
+val frameKnots2 = hc.asH2OFrame(knots2)
+val knots3 = Seq(-1.999675688, -0.979893796, 0.007573327, 1.011437347, 1.999611676).toDF()
+val frameKnots3 = hc.asH2OFrame(knots3)
+
+import ai.h2o.sparkling.ml.algos.H2OGAM
+val gam = new H2OGAM()
+  .setFeaturesCols(Array("C1", "C2"))
+  .setLabelCol("C11")
+  .setFamily("multinomial")
+  .setGamCols(Array("C6", "C7", "C8"))
+  .setColumnsToCategorical("C1", "C2", "C11")
+  .setScale(Array(1.0, 1.0, 1.0))
+  .setNumKnots(Array(5, 5, 5))
+  .setKnotIds(Array(frameKnots1.frameId, frameKnots2.frameId, frameKnots3.frameId))
+
+val gamModel = gam.fit(trainingDF)
+val predictions = gamModel.transform(testingDF)
+predictions.show(truncate = false)
+
+// Clean up knot frames
+frameKnots1.delete()
+frameKnots2.delete()
+frameKnots3.delete()
+```
+
+```python Python
+from pysparkling import *
+hc = H2OContext.getOrCreate()
+
+import h2o
+frame = h2o.import_file("https://s3.amazonaws.com/h2o-public-test-data/smalldata/glm_test/multinomial_10_classes_10_cols_10000_Rows_train.csv")
+sparkDF = hc.asSparkFrame(frame)
+[trainingDF, testingDF] = sparkDF.randomSplit([0.8, 0.2])
+
+# Create knot frames
+knots1 = [-1.99905699, -0.98143075, 0.02599159, 1.00770987, 1.99942290]
+frameKnots1 = h2o.H2OFrame(python_obj=knots1)
+knots2 = [-1.999821861, -1.005257990, -0.006716042, 1.002197392, 1.999073589]
+frameKnots2 = h2o.H2OFrame(python_obj=knots2)
+knots3 = [-1.999675688, -0.979893796, 0.007573327, 1.011437347, 1.999611676]
+frameKnots3 = h2o.H2OFrame(python_obj=knots3)
+
+from pysparkling.ml import H2OGAM
+estimator = H2OGAM(
+    featuresCols=["C1", "C2"],
+    labelCol="C11",
+    family="multinomial",
+    gamCols=["C6", "C7", "C8"],
+    columnsToCategorical=["C1", "C2", "C11"],
+    scale=[1.0, 1.0, 1.0],
+    numKnots=[5, 5, 5],
+    knotIds=[frameKnots1.key, frameKnots2.key, frameKnots3.key])
+
+model = estimator.fit(trainingDF)
+model.transform(testingDF).show(truncate=False)
+
+# Clean up
+h2o.remove(frameKnots1)
+h2o.remove(frameKnots2)
+h2o.remove(frameKnots3)
+h2o.remove(frame)
+```
+
+</CodeGroup>
+
+Use `H2OGAMClassifier` or `H2OGAMRegressor` to pin the problem type explicitly instead of relying on label column type inference.
+
+</Accordion>
+
+<Accordion title="H2OXGBoost" id="h2oxgboost">
+
+XGBoost is a gradient boosted tree algorithm with L1/L2 regularisation, built-in missing value handling, and native support for sparse data. It uses off-heap (native) memory in addition to JVM heap.
+
+**Key parameters**
+
+| Parameter | Description |
+|---|---|
+| `labelCol` | Name of the target column |
+| `featuresCols` | Columns to use as predictors |
+| `ntrees` | Number of boosting rounds |
+| `maxDepth` | Maximum tree depth |
+| `learnRate` | Step size shrinkage (eta) |
+| `reg_lambda` | L2 regularisation on weights |
+| `reg_alpha` | L1 regularisation on weights |
+
+<Warning>
+XGBoost uses off-heap native memory in addition to JVM heap. On YARN or Kubernetes, set `spark.executor.memoryOverhead` to at least 120% of `spark.executor.memory` (in MiB). For example, if `spark.executor.memory` is `10g`, set `spark.executor.memoryOverhead` to `12288`.
+</Warning>
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling._
+val hc = H2OContext.getOrCreate()
+
+import org.apache.spark.SparkFiles
+spark.sparkContext.addFile(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/prostate/prostate.csv")
+val rawSparkDF = spark.read.option("header", "true").option("inferSchema", "true")
+  .csv(SparkFiles.get("prostate.csv"))
+val sparkDF = rawSparkDF.withColumn("CAPSULE", $"CAPSULE" cast "string")
+val Array(trainingDF, testingDF) = sparkDF.randomSplit(Array(0.8, 0.2))
+
+import ai.h2o.sparkling.ml.algos.H2OXGBoost
+val estimator = new H2OXGBoost().setLabelCol("CAPSULE")
+val model = estimator.fit(trainingDF)
+
+model.transform(testingDF).show(false)
+```
+
+```python Python
+from pysparkling import *
+hc = H2OContext.getOrCreate()
+
+import h2o
+frame = h2o.import_file(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/prostate/prostate.csv")
+sparkDF = hc.asSparkFrame(frame)
+sparkDF = sparkDF.withColumn("CAPSULE", sparkDF.CAPSULE.cast("string"))
+[trainingDF, testingDF] = sparkDF.randomSplit([0.8, 0.2])
+
+from pysparkling.ml import H2OXGBoost
+estimator = H2OXGBoost(labelCol="CAPSULE")
+model = estimator.fit(trainingDF)
+
+model.transform(testingDF).show(truncate=False)
+```
+
+</CodeGroup>
+
+<Tip>
+To obtain SHAP values (feature contributions) from an XGBoost model, set `withContributions=True` on the estimator. Contributions are then available in the `detailed_prediction.contributions` field of the prediction DataFrame. See also the [SHAP values guide](/ml/overview) for GBM and DRF.
+</Tip>
+
+</Accordion>
+
+<Accordion title="H2ODeepLearning" id="h2odeeplearning">
+
+H2O Deep Learning is a multi-layer feed-forward artificial neural network trained with stochastic gradient descent and back-propagation. It supports tanh, rectifier, and maxout activation functions and can handle large numbers of hidden layers.
+
+**Key parameters**
+
+| Parameter | Description |
+|---|---|
+| `labelCol` | Name of the target column |
+| `featuresCols` | Columns to use as predictors |
+| `hidden` | Array specifying the number of neurons per hidden layer |
+| `epochs` | Number of passes over the training data |
+| `activation` | Activation function: `Tanh`, `Rectifier`, `Maxout` |
+| `distribution` | Loss distribution (e.g., `tweedie`, `bernoulli`) |
+| `reproducible` | Force single-threaded reproducibility |
+| `seed` | Random seed |
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling._
+val hc = H2OContext.getOrCreate()
+
+import org.apache.spark.SparkFiles
+spark.sparkContext.addFile(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/insurance.csv")
+val sparkDF = spark.read.option("header", "true").option("inferSchema", "true")
+  .csv(SparkFiles.get("insurance.csv"))
+val Array(trainingDF, testingDF) = sparkDF.randomSplit(Array(0.8, 0.2), 23123)
+
+import ai.h2o.sparkling.ml.algos.H2ODeepLearning
+val estimator = new H2ODeepLearning()
+  .setDistribution("tweedie")
+  .setHidden(Array(1))
+  .setEpochs(1000)
+  .setActivation("Tanh")
+  .setReproducible(true)
+  .setSeed(23123)
+  .setTweediePower(1.5)
+  .setColumnsToCategorical("District")
+  .setFeaturesCols("District", "Group", "Age")
+  .setLabelCol("Claims")
+val model = estimator.fit(trainingDF)
+
+val metrics = model.getTrainingMetrics()
+println(metrics)
+model.transform(testingDF).show(false)
+```
+
+```python Python
+from pysparkling import *
+hc = H2OContext.getOrCreate()
+
+import h2o
+frame = h2o.import_file(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/insurance.csv")
+sparkDF = hc.asSparkFrame(frame)
+[trainingDF, testingDF] = sparkDF.randomSplit([0.8, 0.2], 23123)
+
+from pysparkling.ml import H2ODeepLearning
+estimator = H2ODeepLearning(
+    distribution="tweedie",
+    hidden=[1],
+    epochs=1000,
+    activation="Tanh",
+    reproducible=True,
+    seed=23123,
+    tweediePower=1.5,
+    columnsToCategorical=["District"],
+    featuresCols=["District", "Group", "Age"],
+    labelCol="Claims")
+model = estimator.fit(trainingDF)
+
+metrics = model.getTrainingMetrics()
+print(metrics)
+model.transform(testingDF).show(truncate=False)
+```
+
+</CodeGroup>
+
+</Accordion>
+
+<Accordion title="H2OKMeans" id="h2okmeans">
+
+K-Means is a clustering algorithm that partitions observations into k groups. H2O's implementation supports automatic estimation of k via the `estimateK` parameter and scales to large datasets through distributed computation.
+
+**Key parameters**
+
+| Parameter | Description |
+|---|---|
+| `featuresCols` | Columns to cluster on |
+| `k` | Number of clusters |
+| `estimateK` | Automatically estimate the optimal k |
+| `seed` | Random seed for centroid initialisation |
+| `maxIterations` | Maximum number of Lloyd iterations |
+| `init` | Initialisation method: `Random`, `PlusPlus`, `Furthest`, `User` |
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling._
+val hc = H2OContext.getOrCreate()
+
+import org.apache.spark.SparkFiles
+spark.sparkContext.addFile(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/iris/iris_wheader.csv")
+val sparkDF = spark.read.option("header", "true").option("inferSchema", "true")
+  .csv(SparkFiles.get("iris_wheader.csv"))
+val Array(trainingDF, testingDF) = sparkDF.randomSplit(Array(0.8, 0.2))
+
+val predictors = Array("sepal_len", "sepal_wid", "petal_len", "petal_wid")
+
+import ai.h2o.sparkling.ml.algos.H2OKMeans
+val estimator = new H2OKMeans()
+  .setEstimateK(true)
+  .setSeed(1234)
+  .setFeaturesCols(predictors)
+val model = estimator.fit(trainingDF)
+
+val metrics = model.getTrainingMetrics()
+println(metrics)
+model.transform(testingDF).show(false)
+```
+
+```python Python
+from pysparkling import *
+hc = H2OContext.getOrCreate()
+
+import h2o
+frame = h2o.import_file(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/iris/iris_wheader.csv")
+sparkDF = hc.asSparkFrame(frame)
+[trainingDF, testingDF] = sparkDF.randomSplit([0.8, 0.2])
+
+predictors = ["sepal_len", "sepal_wid", "petal_len", "petal_wid"]
+
+from pysparkling.ml import H2OKMeans
+estimator = H2OKMeans(
+    estimateK=True,
+    seed=1234,
+    featuresCols=predictors)
+model = estimator.fit(trainingDF)
+
+metrics = model.getTrainingMetrics()
+print(metrics)
+model.transform(testingDF).show(truncate=False)
+```
+
+</CodeGroup>
+
+</Accordion>
+
+<Accordion title="H2OIsolationForest" id="h2oisolationforest">
+
+Isolation Forest is an unsupervised anomaly detection algorithm. It builds an ensemble of isolation trees that isolate observations by randomly selecting a feature and a split value. Anomalies are isolated in fewer steps and receive higher anomaly scores.
+
+**Key parameters**
+
+| Parameter | Description |
+|---|---|
+| `featuresCols` | Columns to use for isolation |
+| `ntrees` | Number of isolation trees (default: 100) |
+| `maxDepth` | Maximum tree depth |
+| `sampleSize` | Number of rows sampled per tree |
+| `validationDataFrame` | Validation frame with anomaly labels (required for grid search) |
+| `validationLabelCol` | Column in the validation frame identifying anomalies |
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling._
+val hc = H2OContext.getOrCreate()
+
+import org.apache.spark.SparkFiles
+spark.sparkContext.addFile(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/anomaly/ecg_discord_train.csv")
+spark.sparkContext.addFile(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/anomaly/ecg_discord_test.csv")
+val trainingDF = spark.read.option("header", "true").option("inferSchema", "true")
+  .csv(SparkFiles.get("ecg_discord_train.csv"))
+val testingDF = spark.read.option("header", "true").option("inferSchema", "true")
+  .csv(SparkFiles.get("ecg_discord_test.csv"))
+
+import ai.h2o.sparkling.ml.algos.H2OIsolationForest
+val estimator = new H2OIsolationForest()
+val model = estimator.fit(trainingDF)
+
+model.transform(testingDF).show(false)
+```
+
+```python Python
+from pysparkling import *
+hc = H2OContext.getOrCreate()
+
+import h2o
+trainingFrame = h2o.import_file(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/anomaly/ecg_discord_train.csv")
+trainingDF = hc.asSparkFrame(trainingFrame)
+testingFrame = h2o.import_file(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/anomaly/ecg_discord_test.csv")
+testingDF = hc.asSparkFrame(testingFrame)
+
+from pysparkling.ml import H2OIsolationForest
+estimator = H2OIsolationForest()
+model = estimator.fit(trainingDF)
+
+model.transform(testingDF).show(truncate=False)
+```
+
+</CodeGroup>
+
+<Tip>
+You can pair `H2OIsolationForest` with `H2OGridSearch` to tune `ntrees` and `maxDepth`. Pass a `validationDataFrame` containing an anomaly label column so the grid can evaluate candidate models. See the [grid search page](/ml/grid-search) for a full example.
+</Tip>
+
+</Accordion>
+
+<Accordion title="H2OExtendedIsolationForest" id="h2oextendedisolationforest">
+
+Extended Isolation Forest generalises the original Isolation Forest by adjusting the branching direction at each split, eliminating the axis-aligned bias present in the original algorithm. The original algorithm is a special case with `extensionLevel = 0`.
+
+**Key parameters**
+
+| Parameter | Description |
+|---|---|
+| `featuresCols` | Columns to use for isolation |
+| `ntrees` | Number of isolation trees (default: 100) |
+| `sampleSize` | Number of rows sampled per tree (default: 256) |
+| `extensionLevel` | Degree of extension: 0 = original Isolation Forest, `features - 1` = fully extended |
+| `seed` | Random seed |
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling._
+val hc = H2OContext.getOrCreate()
+
+import org.apache.spark.SparkFiles
+spark.sparkContext.addFile(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/prostate/prostate.csv")
+val sparkDF = spark.read.option("header", "true").option("inferSchema", "true")
+  .csv(SparkFiles.get("prostate.csv"))
+val Array(trainingDF, testingDF) = sparkDF.randomSplit(Array(0.8, 0.2))
+
+import ai.h2o.sparkling.ml.algos.H2OExtendedIsolationForest
+val predictors = Array("AGE", "RACE", "DPROS", "DCAPS", "PSA", "VOL", "GLEASON")
+val algo = new H2OExtendedIsolationForest()
+  .setSampleSize(256)
+  .setNtrees(100)
+  .setExtensionLevel(predictors.length - 1)
+  .setSeed(1234)
+  .setFeaturesCols(predictors)
+val model = algo.fit(trainingDF)
+
+model.transform(testingDF).show(truncate = false)
+model.getModelSummary()
+```
+
+```python Python
+from pysparkling import *
+hc = H2OContext.getOrCreate()
+
+import h2o
+frame = h2o.import_file(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/prostate/prostate.csv")
+sparkDF = hc.asSparkFrame(frame)
+[trainingDF, testingDF] = sparkDF.randomSplit([0.8, 0.2])
+
+from pysparkling.ml import H2OExtendedIsolationForest
+predictors = ["AGE", "RACE", "DPROS", "DCAPS", "PSA", "VOL", "GLEASON"]
+algo = H2OExtendedIsolationForest(
+    featuresCols=predictors,
+    sampleSize=256,
+    ntrees=100,
+    seed=1234,
+    extensionLevel=len(predictors) - 1)
+model = algo.fit(trainingDF)
+
+model.transform(testingDF).show(truncate=False)
+model.getModelSummary()
+```
+
+</CodeGroup>
+
+</Accordion>
+
+<Accordion title="H2OCoxPH — Cox Proportional Hazards" id="h2ocoxph">
+
+Cox Proportional Hazards is a survival analysis algorithm that models the time until an event (e.g., failure, death) while handling right-censored observations. It estimates the effect of predictor variables on the hazard rate.
+
+**Key parameters**
+
+| Parameter | Description |
+|---|---|
+| `labelCol` | Column marking whether the event occurred (0/1) |
+| `startCol` | Column containing the observation start time |
+| `stopCol` | Column containing the observation stop time |
+| `ties` | Method for handling tied event times: `efron` or `breslow` |
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling._
+val hc = H2OContext.getOrCreate()
+
+import org.apache.spark.SparkFiles
+spark.sparkContext.addFile(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/coxph_test/heart.csv")
+val heartDF = spark.read.option("header", "true").option("inferSchema", "true")
+  .csv(SparkFiles.get("heart.csv"))
+val Array(trainingDF, testingDF) = heartDF.randomSplit(Array(0.8, 0.2), seed = 12345)
+
+import ai.h2o.sparkling.ml.algos.H2OCoxPH
+val estimator = new H2OCoxPH()
+  .setStartCol("start")
+  .setStopCol("stop")
+  .setTies("breslow")
+  .setLabelCol("event")
+val model = estimator.fit(trainingDF)
+
+model.transform(testingDF).show(false)
+```
+
+```python Python
+from pysparkling import *
+hc = H2OContext.getOrCreate()
+
+import h2o
+heartFrame = h2o.import_file(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/coxph_test/heart.csv")
+trainingFrame, testingFrame = heartFrame.split_frame(ratios=[.8], seed=1234)
+trainingDF = hc.asSparkFrame(trainingFrame)
+testingDF = hc.asSparkFrame(testingFrame)
+
+from pysparkling.ml import H2OCoxPH
+estimator = H2OCoxPH()\
+    .setStartCol('start')\
+    .setStopCol('stop')\
+    .setTies('breslow')\
+    .setLabelCol('event')
+model = estimator.fit(trainingDF)
+
+model.transform(testingDF).show(truncate=False)
+```
+
+</CodeGroup>
+
+</Accordion>
+
+<Accordion title="H2ORuleFit" id="h2orulefit">
+
+RuleFit combines a tree ensemble with a sparse linear LASSO model. The algorithm fits a tree ensemble to the data, extracts decision rules by traversing each tree, evaluates those rules as binary features, and then fits a LASSO model on the combined rule and original feature set. The result is an interpretable rule set with competitive accuracy.
+
+**Key parameters**
+
+| Parameter | Description |
+|---|---|
+| `labelCol` | Name of the target column |
+| `featuresCols` | Columns to use as predictors |
+| `maxRuleLength` | Maximum depth of rules extracted from trees |
+| `maxNumRules` | Maximum number of rules to retain |
+| `seed` | Random seed |
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling._
+val hc = H2OContext.getOrCreate()
+
+import org.apache.spark.SparkFiles
+spark.sparkContext.addFile("https://s3.amazonaws.com/h2o-public-test-data/smalldata/gbm_test/titanic.csv")
+val rawSparkDF = spark.read.option("header", "true").option("inferSchema", "true")
+  .csv(SparkFiles.get("titanic.csv"))
+val Array(trainingDF, testingDF) = rawSparkDF.randomSplit(Array(0.8, 0.2), seed = 1L)
+
+import ai.h2o.sparkling.ml.algos.H2ORuleFit
+val estimator = new H2ORuleFit()
+  .setMaxRuleLength(10)
+  .setMaxNumRules(100)
+  .setSeed(1)
+  .setLabelCol("survived")
+  .setColumnsToCategorical(Array("pclass", "survived"))
+  .setFeaturesCols(Array("age", "sibsp", "parch", "fare", "sex", "pclass"))
+val model = estimator.fit(trainingDF)
+
+model.getRuleImportance().show(truncate = false)
+model.transform(testingDF).show(false)
+```
+
+```python Python
+from pysparkling import *
+hc = H2OContext.getOrCreate()
+
+import h2o
+frame = h2o.import_file("https://s3.amazonaws.com/h2o-public-test-data/smalldata/gbm_test/titanic.csv")
+sparkDF = hc.asSparkFrame(frame)
+[trainingDF, testingDF] = sparkDF.randomSplit([0.8, 0.2], seed=1)
+
+from pysparkling.ml import H2ORuleFit
+estimator = H2ORuleFit()\
+    .setMaxRuleLength(10)\
+    .setMaxNumRules(100)\
+    .setSeed(1)\
+    .setLabelCol("survived")\
+    .setColumnsToCategorical(["pclass", "survived"])\
+    .setFeaturesCols(["age", "sibsp", "parch", "fare", "sex", "pclass"])
+model = estimator.fit(trainingDF)
+
+model.getRuleImportance().show(truncate=False)
+model.transform(testingDF).show(truncate=False)
+```
+
+</CodeGroup>
+
+</Accordion>
+
+<Accordion title="H2OStackedEnsemble" id="h2ostackedensemble">
+
+Stacked Ensemble finds an optimal combination of a collection of base models (the "stack") using a meta-learner. The meta-learner can be trained on cross-validated predictions from the base models or on a held-out blending frame.
+
+**Requirements for cross-validated stacking:**
+- All base models must use the same fold assignment (e.g., `Modulo`) and the same number of folds.
+- `setKeepCrossValidationPredictions(true)` must be set on each base model.
+- `setKeepBinaryModels(true)` must be set on each base model so the H2O backend retains the trained models.
+
+**Key parameters**
+
+| Parameter | Description |
+|---|---|
+| `baseAlgorithms` | Array of configured (but not yet trained) base algorithm instances |
+| `labelCol` | Name of the target column |
+| `metalearnerAlgorithm` | Algorithm for the meta-learner (default: `AUTO`) |
+| `blendingDataFrame` | Optional held-out frame for training the meta-learner |
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling._
+val hc = H2OContext.getOrCreate()
+
+import org.apache.spark.SparkFiles
+spark.sparkContext.addFile(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/prostate/prostate.csv")
+val rawSparkDF = spark.read.option("header", "true").option("inferSchema", "true")
+  .csv(SparkFiles.get("prostate.csv"))
+val dataset = rawSparkDF.withColumn("CAPSULE", $"CAPSULE" cast "string")
+
+import ai.h2o.sparkling.ml.algos.{H2ODRF, H2OGBM, H2OStackedEnsemble}
+val drf = new H2ODRF()
+  .setLabelCol("CAPSULE")
+  .setNfolds(5)
+  .setFoldAssignment("Modulo")
+  .setKeepBinaryModels(true)
+  .setKeepCrossValidationPredictions(true)
+
+val gbm = new H2OGBM()
+  .setLabelCol("CAPSULE")
+  .setNfolds(5)
+  .setFoldAssignment("Modulo")
+  .setKeepBinaryModels(true)
+  .setKeepCrossValidationPredictions(true)
+
+val ensemble = new H2OStackedEnsemble()
+  .setBaseAlgorithms(Array(drf, gbm))
+  .setLabelCol("CAPSULE")
+
+val ensembleModel = ensemble.fit(dataset)
+ensembleModel.getModelDetails()
+```
+
+```python Python
+from pysparkling import *
+hc = H2OContext.getOrCreate()
+
+import h2o
+frame = h2o.import_file(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/prostate/prostate.csv")
+sparkDF = hc.asSparkFrame(frame)
+dataset = sparkDF.withColumn("CAPSULE", sparkDF.CAPSULE.cast("string"))
+
+from pysparkling.ml import H2ODRF, H2OGBM, H2OStackedEnsemble
+drf = H2ODRF()
+drf.setLabelCol("CAPSULE")
+drf.setNfolds(5)
+drf.setFoldAssignment("Modulo")
+drf.setKeepBinaryModels(True)
+drf.setKeepCrossValidationPredictions(True)
+
+gbm = H2OGBM()
+gbm.setLabelCol("CAPSULE")
+gbm.setNfolds(5)
+gbm.setFoldAssignment("Modulo")
+gbm.setKeepBinaryModels(True)
+gbm.setKeepCrossValidationPredictions(True)
+
+ensemble = H2OStackedEnsemble()
+ensemble.setBaseAlgorithms([drf, gbm])
+ensemble.setLabelCol("CAPSULE")
+
+ensemble_model = ensemble.fit(dataset)
+ensemble_model.getModelDetails()
+```
+
+</CodeGroup>
+
+</Accordion>
+
+</AccordionGroup>

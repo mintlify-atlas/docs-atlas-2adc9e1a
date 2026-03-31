@@ -1,0 +1,202 @@
+---
+title: "Spark ↔ H2O Data Conversions"
+description: "Convert data between Spark DataFrames, RDDs, and H2O Frames using H2OContext in Sparkling Water."
+keywords: ["spark", "h2o", "dataframe", "rdd", "conversion", "asH2OFrame", "asSparkFrame"]
+---
+
+The `H2OContext` class is the central entry point for all conversions between Spark and H2O data structures. It provides methods to move data in both directions without unnecessary copying where possible.
+
+## Spark DataFrame to H2OFrame
+
+The `asH2OFrame` method converts a Spark DataFrame into an H2OFrame. The conversion creates a new H2OFrame, transfers data from the DataFrame, and saves it to the DKV store on the H2O backend.
+
+<CodeGroup>
+
+```scala Scala
+// Basic conversion
+val h2oFrame = h2oContext.asH2OFrame(df)
+
+// With a custom frame name
+val h2oFrame = h2oContext.asH2OFrame(df, "my_frame")
+```
+
+```python Python
+# Basic conversion
+h2o_frame = h2oContext.asH2OFrame(df)
+
+# With a custom frame name and column limit
+# fullCols=-1 means no limit on columns sent to client preview
+h2o_frame = h2oContext.asH2OFrame(df, "my_frame", fullCols=-1)
+```
+
+</CodeGroup>
+
+### Python parameters
+
+| Parameter | Description |
+|-----------|-------------|
+| `sparkFrame` | The PySpark DataFrame to convert |
+| `h2oFrameName` | Optional name for the resulting H2OFrame |
+| `fullCols` | Number of columns to include in the client preview. `-1` means no limit. |
+
+<Note>
+If your DataFrame has more than 100 columns, Sparkling Water still fully converts all columns to H2OFrame. The `fullCols` parameter only controls how many columns are sent to the H2O Flow client for preview — it does not truncate the actual frame.
+</Note>
+
+## RDD to H2OFrame
+
+The `asH2OFrame` method also accepts an `RDD[A]` where `A` must extend `Product` (all Scala case classes qualify).
+
+<CodeGroup>
+
+```scala Scala
+// Convert an RDD of case class instances
+case class Person(name: String, age: Int)
+val rdd: RDD[Person] = sc.parallelize(Seq(Person("Alice", 30), Person("Bob", 25)))
+
+val h2oFrame = h2oContext.asH2OFrame(rdd)
+
+// With a custom frame name
+val h2oFrame = h2oContext.asH2OFrame(rdd, "people_frame")
+```
+
+```python Python
+# Convert a PySpark RDD
+h2o_frame = h2oContext.asH2OFrame(rdd)
+
+# With a custom frame name
+h2o_frame = h2oContext.asH2OFrame(rdd, h2oFrameName="people_frame")
+```
+
+</CodeGroup>
+
+## H2OFrame to Spark DataFrame
+
+The `asSparkFrame` method wraps an H2OFrame as a Spark DataFrame. The schema is derived from the column names and types of the H2OFrame.
+
+<CodeGroup>
+
+```scala Scala
+val dataFrame = h2oContext.asSparkFrame(h2oFrame)
+```
+
+```python Python
+data_frame = h2oContext.asSparkFrame(h2oFrame)
+```
+
+</CodeGroup>
+
+## H2OFrame to RDD
+
+In Scala, you can also convert an H2OFrame back to a typed `RDD[A]`. The type `A` must satisfy the `Product` upper bound. Column-to-attribute matching is done by name.
+
+```scala Scala
+case class Person(name: String, age: Int)
+val rdd: RDD[Person] = h2oContext.asRDD[Person](h2oFrame)
+```
+
+<Note>
+The Python API does not expose `asRDD` directly. Use `asSparkFrame` to get a DataFrame and call `.rdd` on it if you need an RDD.
+</Note>
+
+## Using H2OFrame as a Spark data source
+
+H2OFrame can be used directly via the Spark Data Source API using the `"h2o"` format string. This is an alternative to calling `asSparkFrame`.
+
+### Reading a Spark DataFrame from an H2OFrame
+
+<CodeGroup>
+
+```scala Scala
+// Using .option() to pass the frame key
+val df = spark.read.format("h2o").option("key", "testFrame").load()
+
+// Or pass the key directly to .load()
+val df = spark.read.format("h2o").load("testFrame")
+```
+
+```python Python
+# Using .option() to pass the frame key
+df = spark.read.format("h2o").option("key", "testFrame").load()
+
+# Or pass the key directly to .load()
+df = spark.read.format("h2o").load("testFrame")
+```
+
+</CodeGroup>
+
+### Writing a Spark DataFrame as an H2OFrame
+
+<CodeGroup>
+
+```scala Scala
+// Using .option() to set the output key
+df.write.format("h2o").option("key", "new_key").save()
+
+// Or pass the key directly to .save()
+df.write.format("h2o").save("new_key")
+```
+
+```python Python
+# Using .option() to set the output key
+df.write.format("h2o").option("key", "new_key").save()
+
+# Or pass the key directly to .save()
+df.write.format("h2o").save("new_key")
+```
+
+</CodeGroup>
+
+<Tip>
+If you specify a key both via `.option("key", ...)` and as an argument to `.load()`/`.save()`, the `.option()` value takes precedence.
+</Tip>
+
+### Save modes
+
+The Data Source API supports four save modes when writing to H2OFrame:
+
+| Mode | Behavior |
+|------|----------|
+| `append` | Deletes the existing H2OFrame with the same key and creates a new one containing the union of rows from the original and the appended DataFrame. |
+| `overwrite` | Deletes the existing H2OFrame and creates a new one with the new rows. |
+| `error` (default) | Throws an exception if an H2OFrame with the specified key already exists. |
+| `ignore` | Does nothing if an H2OFrame with the specified key already exists. |
+
+## Supported data type mappings
+
+### Spark DataFrame / RDD types → H2O types
+
+| Scala type | Spark SQL type | H2O type |
+|------------|----------------|----------|
+| *(N/A)* | `BinaryType` | Numeric |
+| `Byte` | `ByteType` | Numeric |
+| `Short` | `ShortType` | Numeric |
+| `Integer` | `IntegerType` | Numeric |
+| `Long` | `LongType` | Numeric |
+| `Float` | `FloatType` | Numeric |
+| `Double` | `DoubleType` | Numeric |
+| `String` | `StringType` | String or Categorical [^1] |
+| `Boolean` | `BooleanType` | Categorical [^2] |
+| `java.sql.Timestamp` | `TimestampType` | Time |
+
+[^1]: H2O type is `String` if cardinality exceeds 10,000,000 or if the ratio of unique values to all values is 95% or higher. Otherwise it is `Categorical`.
+[^2]: Categorical values are `"True"` and `"False"`.
+
+### Supported types for `RDD[T]` conversions
+
+In addition to the primitive types above, the following types are supported as `T` in `RDD[T]`:
+
+- `Byte`, `Short`, `Integer`, `Long`, `Float`, `Double`, `String`, `Boolean`
+- `java.sql.Timestamp`
+- Any Scala class extending `scala.Product` (all case classes)
+- `org.apache.spark.mllib.regression.LabeledPoint`
+
+## Tips on avoiding unnecessary copies
+
+<Tip>
+Both `asH2OFrame` and `asSparkFrame` create wrapper objects that reference the underlying data — they do not copy data unless a format conversion requires it. Minimize the number of round-trip conversions between Spark and H2O to avoid unnecessary data movement across the cluster.
+</Tip>
+
+- Perform as much preprocessing as possible on one side (Spark or H2O) before converting.
+- When using H2O for model training only, convert once to H2OFrame for training and convert predictions back to DataFrame only when needed downstream in Spark.
+- Use the `"h2o"` Data Source format for integration with existing Spark pipelines that use the DataFrame reader/writer API — it avoids importing `H2OContext` directly.

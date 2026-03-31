@@ -1,80 +1,257 @@
 ---
 title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+description: "Get from zero to a working H2O machine learning model inside Apache Spark in minutes, using Scala or Python."
 ---
 
-## Get started in three steps
-
-Get your documentation site running locally and make your first customization.
-
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+This guide walks you through starting a Spark session, initializing H2O, loading data, training a GBM model, and making predictions. Choose Scala (Sparkling Water) or Python (PySparkling) throughout.
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  You need Java 8 or later, Apache Spark 3.5 (with `SPARK_HOME` set), and either the Sparkling Water JAR or the `h2o_pysparkling_3.5` Python package installed. See [Installation](/installation) for setup instructions.
 </Note>
+
+## Get started
+
+<Steps>
+  <Step title="Set up your Spark environment">
+    Before starting, point `SPARK_HOME` to your Spark installation and set the cluster master. For local development, `local[*]` uses all available CPU cores:
+
+    ```bash
+    export SPARK_HOME="/path/to/spark/installation"
+    export MASTER="local[*]"
+    ```
+
+    <Tip>
+      For Scala, you can also launch the bundled Sparkling shell, which puts the Sparkling Water JAR on the classpath automatically:
+
+      ```bash
+      bin/sparkling-shell
+      ```
+    </Tip>
+  </Step>
+
+  <Step title="Start a SparkSession">
+    Create a `SparkSession` as the entry point to your Spark cluster. In an interactive shell (Scala REPL or PySpark), a session is created for you — use this step when writing a standalone application.
+
+    <CodeGroup>
+
+    ```scala Scala
+    import org.apache.spark.sql.SparkSession
+
+    val spark = SparkSession
+      .builder()
+      .appName("Sparkling Water Demo")
+      .getOrCreate()
+    ```
+
+    ```python Python
+    from pyspark.sql import SparkSession
+
+    spark = SparkSession \
+        .builder \
+        .appName("PySparkling Demo") \
+        .getOrCreate()
+    ```
+
+    </CodeGroup>
+  </Step>
+
+  <Step title="Create an H2OContext">
+    `H2OContext` starts H2O services on top of the Spark cluster and provides the bridge between Spark and H2O data structures. A single call is all that is required:
+
+    <CodeGroup>
+
+    ```scala Scala
+    import ai.h2o.sparkling._
+
+    val hc = H2OContext.getOrCreate()
+    import hc._
+    ```
+
+    ```python Python
+    from pysparkling import H2OContext
+
+    hc = H2OContext.getOrCreate()
+    ```
+
+    </CodeGroup>
+
+    <Note>
+      When copying multi-line code into the Scala Sparkling shell, use `:paste` mode in the Scala REPL to avoid compiler errors. Enter `:paste`, paste your code, then press `Ctrl+D` to execute.
+    </Note>
+
+    After this call, H2O nodes are co-located with Spark executors in the same JVMs. You can open the H2O Flow UI at the URL printed to the console.
+  </Step>
+
+  <Step title="Load data as a Spark DataFrame">
+    Use the standard Spark reader to load your dataset. The resulting DataFrame can be passed directly to H2O algorithms — no manual conversion step is needed.
+
+    <CodeGroup>
+
+    ```scala Scala
+    import java.io.File
+
+    val dataPath = "./examples/smalldata/airlines/allyears2k_headers.csv"
+    val dataFile = s"file://${new File(dataPath).getAbsolutePath}"
+
+    val airlinesDF = spark.read
+      .option("header", "true")
+      .option("inferSchema", "true")
+      .option("nullValue", "NA")
+      .csv(dataFile)
+
+    // Filter to flights destined for SFO
+    import spark.implicits._
+    val trainDF = airlinesDF
+      .filter('Dest === "SFO")
+      .select('Year, 'Month, 'DayofMonth, 'DayOfWeek,
+              'CRSDepTime, 'CRSArrTime, 'UniqueCarrier,
+              'CRSElapsedTime, 'Origin, 'Dest,
+              'Distance, 'IsDepDelayed)
+    ```
+
+    ```python Python
+    import os
+
+    data_path = os.path.abspath("./examples/smalldata/airlines/allyears2k_headers.csv")
+    data_file = f"file://{data_path}"
+
+    airlines_df = spark.read \
+        .option("header", "true") \
+        .option("inferSchema", "true") \
+        .option("nullValue", "NA") \
+        .csv(data_file)
+
+    # Filter to flights destined for SFO
+    train_df = airlines_df \
+        .filter(airlines_df.Dest == "SFO") \
+        .select("Year", "Month", "DayofMonth", "DayOfWeek",
+                "CRSDepTime", "CRSArrTime", "UniqueCarrier",
+                "CRSElapsedTime", "Origin", "Dest",
+                "Distance", "IsDepDelayed")
+    ```
+
+    </CodeGroup>
+  </Step>
+
+  <Step title="Train an H2O model">
+    H2O algorithms are exposed as Spark ML-compatible estimators. Set the label column, call `fit()` on a Spark DataFrame, and get back a trained model. No manual conversion from DataFrame to H2OFrame is required — Sparkling Water handles it internally.
+
+    <CodeGroup>
+
+    ```scala Scala
+    import ai.h2o.sparkling.ml.algos.H2ODeepLearning
+
+    val dl = new H2ODeepLearning()
+      .setLabelCol("IsDepDelayed")
+      .setConvertUnknownCategoricalLevelsToNa(true)
+
+    val model = dl.fit(trainDF)
+    ```
+
+    ```python Python
+    from pysparkling.ml import H2ODeepLearning
+
+    dl = H2ODeepLearning(
+        labelCol="IsDepDelayed",
+        convertUnknownCategoricalLevelsToNa=True
+    )
+
+    model = dl.fit(train_df)
+    ```
+
+    </CodeGroup>
+
+    <Tip>
+      Sparkling Water also includes `H2OGBM`, `H2OXGBoost`, `H2OAutoML`, `H2OGLM`, `H2OKMeans`, and more. All follow the same `fit()` / `transform()` pattern as Spark ML estimators. See [Machine Learning](/ml/overview) for the full list.
+    </Tip>
+  </Step>
+
+  <Step title="Make predictions">
+    Call `transform()` on the trained model with a Spark DataFrame. The result is a Spark DataFrame with a `prediction` column appended.
+
+    <CodeGroup>
+
+    ```scala Scala
+    val predictions = model.transform(airlinesDF)
+    predictions.select("prediction").show(5)
+    ```
+
+    ```python Python
+    predictions = model.transform(airlines_df)
+    predictions.select("prediction").show(5)
+    ```
+
+    </CodeGroup>
+
+    The output is a standard Spark DataFrame — you can write it to storage, join it with other data, or pass it to further Spark transformations.
+  </Step>
+</Steps>
+
+## Use H2OConf to customize the cluster
+
+Before calling `H2OContext.getOrCreate()`, you can pass an `H2OConf` object to control cluster behavior — for example, to use the external backend or change the listening port:
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling._
+
+val conf = new H2OConf()
+  .setBasePort(55555)
+  .setCloudName("my-h2o-cluster")
+
+val hc = H2OContext.getOrCreate(conf)
+```
+
+```python Python
+from pysparkling import H2OContext, H2OConf
+
+conf = H2OConf() \
+    .setBasePort(55555) \
+    .setCloudName("my-h2o-cluster")
+
+hc = H2OContext.getOrCreate(conf)
+```
+
+</CodeGroup>
+
+To connect to a separately running external H2O cluster instead of starting one inside Spark:
+
+<CodeGroup>
+
+```scala Scala
+val conf = new H2OConf()
+  .setExternalClusterMode()
+  .useManualClusterStart()
+  .setCloudName("test")
+
+val hc = H2OContext.getOrCreate(conf)
+```
+
+```python Python
+conf = H2OConf() \
+    .setExternalClusterMode() \
+    .useManualClusterStart() \
+    .setCloudName("test")
+
+hc = H2OContext.getOrCreate(conf)
+```
+
+</CodeGroup>
+
+## What to explore next
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Maven, PyPI, Spark packages, and binary download options.
+  </Card>
+  <Card title="Backends" icon="server" href="/deployment/backends">
+    Choose between internal (co-located) and external H2O cluster modes.
+  </Card>
+  <Card title="Machine learning" icon="brain" href="/ml/overview">
+    Full list of H2O algorithms available as Spark ML estimators.
+  </Card>
+  <Card title="PySparkling" icon="python" href="/pysparkling/overview">
+    Running PySparkling in notebooks, IPython, and Databricks.
+  </Card>
+</CardGroup>

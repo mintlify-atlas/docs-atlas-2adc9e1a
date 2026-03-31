@@ -1,0 +1,191 @@
+---
+title: "Architecture"
+description: "How Sparkling Water integrates H2O into a Spark cluster, covering the cluster topology, H2OContext, data flow, and backend modes."
+keywords: ["sparkling water", "architecture", "H2OContext", "internal backend", "external backend", "spark executor"]
+---
+
+Sparkling Water is designed to execute as a regular Spark application. It starts H2O services on each node in the Spark cluster and provides transparent access to both Spark and H2O data structures and algorithms.
+
+## Spark cluster topology
+
+A Spark cluster consists of one **Driver JVM** and one or more **Executor JVMs**.
+
+- The **Driver** is the machine running the application process that creates the `SparkSession`. It coordinates the Spark Context, which connects to the cluster manager (Spark standalone, YARN, or Kubernetes) to allocate executor resources.
+- **Executors** are worker processes that receive application code and run the tasks dispatched by the Driver.
+
+```text
+Driver JVM
+└── SparkSession (spark)
+    └── H2OContext (hc)
+        ├── Executor JVM 1  →  H2O Node 1
+        ├── Executor JVM 2  →  H2O Node 2
+        └── Executor JVM N  →  H2O Node N
+```
+
+<Info>
+H2O nodes are co-located with Spark Executors. When the H2O cluster starts, its topology matches the Spark cluster exactly — each H2O node shares the same JVM as a Spark Executor. Because they share the JVM, data movement between Spark and H2O is an in-memory, in-process operation.
+</Info>
+
+## H2OContext: the bridge between Spark and H2O
+
+`H2OContext` (`ai.h2o.sparkling.H2OContext`) is the central entry point for Sparkling Water. It:
+
+- Starts H2O services on each Spark Executor.
+- Maintains the connection to the H2O cluster.
+- Provides primitives to transfer data between Spark and H2O.
+- Follows the same design principles as `SparkSession`, `SparkContext`, and `SQLContext`.
+
+### Starting H2OContext
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling._
+import org.apache.spark.sql.SparkSession
+
+val spark = SparkSession
+  .builder()
+  .appName("My Sparkling Water App")
+  .getOrCreate()
+
+val hc = H2OContext.getOrCreate()
+```
+
+```python Python
+from pysparkling import *
+from pyspark.sql import SparkSession
+
+# Initiate SparkSession
+spark = SparkSession.builder.appName("My Sparkling Water App").getOrCreate()
+
+# Initiate H2OContext
+hc = H2OContext.getOrCreate()
+```
+
+</CodeGroup>
+
+The `H2OContext.getOrCreate()` call discovers all active Spark Executors, starts an H2O instance inside each one, and forms an H2O cloud. The resulting `hc` object is the handle for all subsequent H2O interactions.
+
+<Info>
+`H2OContext` follows the same singleton pattern as `SparkSession`. Calling `getOrCreate()` returns an existing context if one is already running, or creates a new one.
+</Info>
+
+## Data flow
+
+A typical Sparkling Water workflow moves data through the following stages:
+
+```text
+Spark DataFrame  →  H2OFrame  →  H2O Model  →  Predictions (Spark DataFrame)
+```
+
+1. **Load data with Spark** — use any Spark data source to read a DataFrame.
+2. **Convert to H2OFrame** — pass the DataFrame to `hc.asH2OFrame(df)`. This copies the data from Spark's row-oriented storage into H2O's columnar, compressed format.
+3. **Train an H2O model** — H2O algorithms operate directly on `H2OFrame` objects stored in H2O's distributed key/value store.
+4. **Score and return to Spark** — use the Sparkling Water ML pipeline API to call `model.transform(df)`, which returns a standard Spark DataFrame containing the predictions.
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling._
+import ai.h2o.sparkling.ml.algos.H2ODeepLearning
+import org.apache.spark.sql.SparkSession
+
+val spark = SparkSession.builder().appName("Deep Learning Demo").getOrCreate()
+import spark.implicits._
+
+// 1. Load data with Spark
+val airlinesTable = spark.read
+  .option("header", "true")
+  .option("inferSchema", "true")
+  .option("nullValue", "NA")
+  .csv("file:///path/to/airlines.csv")
+
+// 2. Start H2OContext (H2OFrame conversion happens inside the algorithm)
+H2OContext.getOrCreate()
+
+// 3. Train an H2O model using the Spark ML pipeline API
+val dl = new H2ODeepLearning()
+  .setLabelCol("IsDepDelayed")
+  .setConvertUnknownCategoricalLevelsToNa(true)
+val model = dl.fit(airlinesTable)
+
+// 4. Score — returns a Spark DataFrame
+val predictions = model.transform(airlinesTable).select("prediction")
+```
+
+```python Python
+from pysparkling import *
+from pysparkling.ml import H2ODeepLearning
+from pyspark.sql import SparkSession
+
+spark = SparkSession.builder.appName("Deep Learning Demo").getOrCreate()
+hc = H2OContext.getOrCreate()
+
+# 1. Load data with Spark
+airlines_df = spark.read \
+  .option("header", "true") \
+  .option("inferSchema", "true") \
+  .option("nullValue", "NA") \
+  .csv("file:///path/to/airlines.csv")
+
+# 2. Train an H2O model using the Spark ML pipeline API
+dl = H2ODeepLearning(labelCol="IsDepDelayed",
+                     convertUnknownCategoricalLevelsToNa=True)
+model = dl.fit(airlines_df)
+
+# 3. Score — returns a Spark DataFrame
+predictions = model.transform(airlines_df).select("prediction")
+```
+
+</CodeGroup>
+
+## Internal vs external backend
+
+Sparkling Water supports two deployment backends that determine how the H2O cluster is created and managed.
+
+### Internal backend (default)
+
+H2O nodes are started automatically inside each Spark Executor JVM when `H2OContext.getOrCreate()` is called. The H2O cluster topology mirrors the Spark cluster exactly.
+
+```text
+Spark Executor JVM
+├── Spark task threads
+└── H2O node (same JVM, same memory)
+```
+
+**Trade-offs:**
+- Simplest to deploy — no additional infrastructure required.
+- Shares JVM memory with Spark. Both Spark and H2O compete for the same heap.
+- If Spark or YARN kills an Executor, the co-located H2O node also terminates, which brings down the entire H2O cluster.
+
+### External backend
+
+The H2O cluster runs separately from Spark. The Spark Driver connects to a pre-started (or automatically launched) H2O cluster over the network.
+
+```text
+Spark Driver  ──(network)──►  H2O Cluster (separate JVMs)
+Spark Executors                H2O Node 1
+                               H2O Node 2
+                               H2O Node N
+```
+
+**Trade-offs:**
+- More stable for production: Spark Executor failures do not affect the H2O cluster.
+- Requires additional infrastructure to manage the H2O cluster lifecycle.
+- Data transfer between Spark and H2O crosses the network instead of being in-process.
+
+<Tip>
+For a full guide on configuring both backends — including automatic and manual external cluster startup — see the [Backends](/deployment/backends) page.
+</Tip>
+
+## PySparkling: Python integration
+
+In PySparkling, the Spark Context uses **Py4J** to start the Driver JVM and the Java Spark Context. The `H2OContext` is then created from Python, which starts the H2O cloud inside the Spark Executors. All pure H2O calls are executed via H2O's REST API interface, while data conversion and cluster management are handled via Py4J bridge calls to the JVM.
+
+```text
+Python process
+└── PySpark (Py4J)
+    └── JVM Driver
+        └── SparkSession
+            └── H2OContext  →  H2O REST API  →  H2O nodes on Executors
+```

@@ -1,97 +1,97 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Sparkling Water"
+description: "Integrate H2O's fast, scalable machine learning engine with Apache Spark. Run H2O algorithms inside your Spark cluster using Scala, Python, or R."
 ---
 
-## Setting up
+Sparkling Water bridges [H2O-3](https://github.com/h2oai/h2o-3) and [Apache Spark](https://spark.apache.org/), letting you combine Spark's distributed data processing with H2O's industry-leading machine learning algorithms — all within a single cluster. Build end-to-end ML pipelines that leverage Spark SQL for data preparation and H2O for model training, then deploy using lightweight MOJO models.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get H2O running inside your Spark cluster in minutes with a working Scala or Python example.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Installation" icon="download" href="/installation">
+    Install via Maven, PyPI, or download the binary distribution for your Spark version.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Core Concepts" icon="book" href="/concepts/architecture">
+    Understand how H2OContext, H2OConf, and data conversions work under the hood.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Machine Learning" icon="brain" href="/ml/overview">
+    Explore H2O algorithms as Spark ML-compatible estimators: AutoML, XGBoost, GLM, and more.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## Get started in three steps
 
-Everything you need to create world-class documentation.
+<Steps>
+  <Step title="Install Sparkling Water">
+    Add the Sparkling Water dependency for your Spark version via Maven or pip:
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+    <CodeGroup>
+    ```bash pip (PySparkling)
+    pip install h2o_pysparkling_3.5
+    ```
+    ```xml Maven (Scala)
+    <dependency>
+      <groupId>ai.h2o</groupId>
+      <artifactId>sparkling-water-package_2.12</artifactId>
+      <version>SW_VERSION</version>
+    </dependency>
+    ```
+    </CodeGroup>
+  </Step>
+  <Step title="Create an H2OContext">
+    Start H2O services on top of your Spark cluster with a single call:
 
-## Need inspiration?
+    <CodeGroup>
+    ```scala Scala
+    import ai.h2o.sparkling._
+    val hc = H2OContext.getOrCreate()
+    ```
+    ```python Python
+    from pysparkling import *
+    hc = H2OContext.getOrCreate()
+    ```
+    </CodeGroup>
+  </Step>
+  <Step title="Train a model">
+    Use H2O algorithms as Spark ML estimators in your pipeline:
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+    <CodeGroup>
+    ```scala Scala
+    import ai.h2o.sparkling.ml.algos.H2OGBM
+    val gbm = new H2OGBM()
+      .setLabelCol("label")
+      .setFeaturesCols("feature1", "feature2")
+    val model = gbm.fit(trainingDF)
+    ```
+    ```python Python
+    from pysparkling.ml import H2OGBM
+    gbm = H2OGBM(labelCol="label", featuresCols=["feature1", "feature2"])
+    model = gbm.fit(training_df)
+    ```
+    </CodeGroup>
+  </Step>
+</Steps>
+
+## Explore by topic
+
+<CardGroup cols={2}>
+  <Card title="Backends" icon="server" href="/deployment/backends">
+    Choose between internal (co-located) and external (standalone) H2O cluster modes.
+  </Card>
+  <Card title="PySparkling" icon="python" href="/pysparkling/overview">
+    Use Sparkling Water from Python and PySpark notebooks.
+  </Card>
+  <Card title="RSparkling" icon="r-project" href="/rsparkling/overview">
+    Drive H2O algorithms from R using the sparklyr integration.
+  </Card>
+  <Card title="MOJO Scoring" icon="bolt" href="/deployment/mojo-scoring">
+    Deploy H2O models for low-latency scoring without a full H2O cluster.
+  </Card>
+  <Card title="Cloud Platforms" icon="cloud" href="/deployment/cloud-platforms">
+    Run on AWS EMR, Azure HDInsight, Databricks, GCP Dataproc, and Kubernetes.
+  </Card>
+  <Card title="FAQ" icon="circle-question" href="/faq">
+    Answers to common configuration, performance, and troubleshooting questions.
+  </Card>
+</CardGroup>

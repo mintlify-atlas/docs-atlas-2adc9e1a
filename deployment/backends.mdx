@@ -1,0 +1,303 @@
+---
+title: "Backends"
+description: "Sparkling Water supports two backend modes for running H2O: Internal (default) and External. Choose the mode that matches your stability and deployment requirements."
+keywords: ["sparkling water", "backends", "internal backend", "external backend", "H2OContext", "H2OConf", "YARN"]
+---
+
+Sparkling Water provides two cluster backend modes that determine how and where H2O nodes run relative to your Spark application.
+
+<Tabs>
+  <Tab title="Internal backend">
+
+## Internal backend
+
+The internal backend is the **default** mode for Sparkling Water. When you call `H2OContext.getOrCreate()`, Sparkling Water automatically discovers all Spark executors and starts an H2O node inside each one. H2O nodes share JVMs with Spark executors, so no separate H2O process management is required.
+
+**How it works:**
+
+- Sparkling Water detects available executors at `H2OContext` initialization time
+- An H2O instance starts inside each discovered executor's JVM
+- The H2O cluster forms automatically and is ready for use
+
+<Warning>
+Because H2O nodes run inside Spark executor JVMs, if Spark or YARN kills an executor, the entire H2O cluster goes down. H2O does not support high availability, so executor eviction brings down the H2O layer.
+</Warning>
+
+### Starting with the internal backend
+
+The internal backend is active by default. You can configure it explicitly via `H2OConf` or rely on the Spark configuration property `spark.ext.h2o.backend.cluster.mode=internal`.
+
+**Explicitly set internal mode via `H2OConf`:**
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling._
+val conf = new H2OConf().setInternalClusterMode()
+val hc = H2OContext.getOrCreate(conf)
+```
+
+```python Python
+from pysparkling import *
+conf = H2OConf().setInternalClusterMode()
+hc = H2OContext.getOrCreate(conf)
+```
+
+</CodeGroup>
+
+**Use the property set on the command line or `SparkConf`:**
+
+If `spark.ext.h2o.backend.cluster.mode` was already set to `internal` on the command line or in `SparkConf`, you can call `getOrCreate()` with no arguments:
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling._
+val hc = H2OContext.getOrCreate()
+```
+
+```python Python
+from pysparkling import *
+hc = H2OContext.getOrCreate()
+```
+
+</CodeGroup>
+
+**Explicitly pass a default `H2OConf`:**
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling._
+val conf = new H2OConf()
+val hc = H2OContext.getOrCreate(conf)
+```
+
+```python Python
+from pysparkling import *
+conf = H2OConf()
+hc = H2OContext.getOrCreate(conf)
+```
+
+</CodeGroup>
+
+  </Tab>
+  <Tab title="External backend">
+
+## External backend
+
+In external mode, the H2O cluster runs **separately** from the Spark application. The Spark driver connects to the independently managed H2O cluster rather than spawning H2O inside executor JVMs.
+
+**Key advantages:**
+
+- H2O cluster lifecycle is decoupled from Spark executor lifecycle
+- Executor eviction by Spark or YARN does not affect the H2O cluster
+- Better suited for production deployments requiring stability
+
+The external backend has two sub-modes: **automatic** and **manual**.
+
+### Automatic mode (YARN)
+
+In automatic mode, Sparkling Water starts the H2O cluster on YARN for you. The cluster is started as a map-reduce job and uses a flat-file approach for nodes to form a cloud. This is the recommended approach for production Hadoop environments.
+
+<Steps>
+  <Step title="Get the H2O driver JAR">
+    Fetch the driver JAR for your Hadoop distribution. For example, for CDH 5.8:
+
+    ```bash
+    H2O_DRIVER_JAR=$(./bin/get-h2o-driver.sh cdh5.8)
+    ```
+
+    <Tip>
+    Store the path in the `H2O_DRIVER_JAR` environment variable. Sparkling Water reads it automatically, so you won't need to call `setH2ODriverPath` in code.
+    </Tip>
+  </Step>
+  <Step title="Start H2O on YARN and connect">
+    Configure and create `H2OContext` with the automatic external cluster settings:
+
+    <CodeGroup>
+
+    ```scala Scala
+    import ai.h2o.sparkling._
+    val conf = new H2OConf()
+                .setExternalClusterMode()
+                .useAutoClusterStart()
+                .setH2ODriverPath("path_to_h2o_driver")
+                .setClusterSize(1)          // Number of H2O worker nodes to start
+                .setExternalMemory("2G")    // Memory per single H2O worker node
+                .setYARNQueue("abc")
+    val hc = H2OContext.getOrCreate(conf)
+    ```
+
+    ```python Python
+    from pysparkling import *
+    conf = H2OConf() \
+            .setExternalClusterMode() \
+            .useAutoClusterStart() \
+            .setH2ODriverPath("path_to_h2o_driver") \
+            .setClusterSize(1) \
+            .setExternalMemory("2G") \
+            .setYARNQueue("abc")
+    hc = H2OContext.getOrCreate(conf)
+    ```
+
+    </CodeGroup>
+  </Step>
+</Steps>
+
+<Note>
+When specifying a YARN queue, disable YARN preemption on that queue to keep the H2O cluster stable.
+</Note>
+
+### Manual mode on Hadoop
+
+In manual mode, you start the H2O cluster yourself before connecting Sparkling Water to it.
+
+<Steps>
+  <Step title="Get the H2O driver JAR">
+    ```bash
+    H2O_DRIVER_JAR=$(./bin/get-h2o-driver.sh cdh5.8)
+    ```
+  </Step>
+  <Step title="Set the path to the extensions assembly">
+    ```bash
+    SW_EXTENSIONS_ASSEMBLY=/path/to/sparkling-water-VERSION/jars/sparkling-water-assembly-extensions-VERSION-all.jar
+    ```
+  </Step>
+  <Step title="Start the H2O cluster on Hadoop">
+    ```bash
+    hadoop -jar $H2O_DRIVER_JAR \
+      -libjars $SW_EXTENSIONS_ASSEMBLY \
+      -sw_ext_backend \
+      -jobname test \
+      -nodes 3 \
+      -mapperXmx 6g
+    ```
+
+    <Warning>
+    The `-sw_ext_backend` flag is required. Without it, the cluster will not accept connections from the Sparkling Water client.
+    </Warning>
+  </Step>
+  <Step title="Connect from Sparkling Water">
+    Provide the IP and port of any node in the running H2O cluster:
+
+    <CodeGroup>
+
+    ```scala Scala
+    import ai.h2o.sparkling._
+    val conf = new H2OConf()
+                .setExternalClusterMode()
+                .useManualClusterStart()
+                .setH2OCluster("representant_ip", representant_port)
+                .setCloudName("test")
+    val hc = H2OContext.getOrCreate(conf)
+    ```
+
+    ```python Python
+    from pysparkling import *
+    conf = H2OConf() \
+            .setExternalClusterMode() \
+            .useManualClusterStart() \
+            .setH2OCluster("representant_ip", representant_port) \
+            .setCloudName("test")
+    hc = H2OContext.getOrCreate(conf)
+    ```
+
+    </CodeGroup>
+  </Step>
+</Steps>
+
+### Manual mode (standalone, no Hadoop)
+
+You can also run an external H2O cluster without Hadoop using the standalone mode.
+
+<Steps>
+  <Step title="Get the standalone H2O JAR">
+    ```bash
+    H2O_JAR=$(./bin/get-h2o-driver.sh standalone)
+    ```
+  </Step>
+  <Step title="Set the path to the extensions assembly">
+    ```bash
+    SW_EXTENSIONS_ASSEMBLY=/path/to/sparkling-water-VERSION/jars/sparkling-water-assembly-extensions_SCALA_VERSION-SW_VERSION-all.jar
+    ```
+  </Step>
+  <Step title="Start the standalone H2O cluster">
+    Provide a flat-file listing the IP:port of each H2O node:
+
+    ```bash
+    java -cp "$H2O_JAR:$SW_EXTENSIONS_ASSEMBLY" water.H2OApp \
+      -allow_clients \
+      -name test \
+      -flatfile path_to_flatfile
+    ```
+  </Step>
+  <Step title="Connect from Sparkling Water">
+    <CodeGroup>
+
+    ```scala Scala
+    import ai.h2o.sparkling._
+    val conf = new H2OConf()
+                .setExternalClusterMode()
+                .useManualClusterStart()
+                .setH2OCluster("representant_ip", representant_port)
+                .setClusterSize(3)
+                .setCloudName("test")
+    val hc = H2OContext.getOrCreate(conf)
+    ```
+
+    ```python Python
+    from pysparkling import *
+    conf = H2OConf() \
+            .setExternalClusterMode() \
+            .useManualClusterStart() \
+            .setH2OCluster("representant_ip", representant_port) \
+            .setClusterSize(3) \
+            .setCloudName("test")
+    hc = H2OContext.getOrCreate(conf)
+    ```
+
+    </CodeGroup>
+  </Step>
+</Steps>
+
+### Specifying the client network (Scala)
+
+When the Spark driver is connected to multiple networks, the H2O client inside the driver may select the wrong network interface, preventing the external H2O cluster from reaching it. This is a Scala-only consideration.
+
+**Example scenario:**
+
+- H2O nodes: `192.168.0.1` and `192.168.0.2`
+- Spark driver: `172.16.1.1` (also reachable at `192.168.0.3`)
+- Spark executor: `172.16.1.2`
+
+The H2O client may bind to `172.16.1.1` instead of `192.168.0.3`, causing connectivity failure.
+
+Force the correct network using `setClientNetworkMask`:
+
+```scala
+import ai.h2o.sparkling._
+val conf = new H2OConf()
+            .setExternalClusterMode()
+            .useManualClusterStart()
+            .setH2OCluster("ip", port)
+            .setClientNetworkMask("192.168.0.0/24")
+            .setClusterSize(2)
+            .setCloudName("test")
+val hc = H2OContext.getOrCreate(conf)
+```
+
+Alternatively, pin to a specific IP address with `setClientIp("192.168.0.3")`. The IP must belong to the Spark driver and be in the same network as the H2O worker nodes.
+
+  </Tab>
+</Tabs>
+
+## Choosing a backend
+
+| Consideration | Internal | External |
+|---|---|---|
+| Setup complexity | Simple — no extra processes | More setup required |
+| Stability | Tied to Spark executor lifecycle | Independent of Spark executors |
+| Recommended for | Development, experimentation | Production workloads |
+| YARN required | No | Only for automatic mode |
+| H2O HA | Not supported | Not supported |

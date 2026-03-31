@@ -1,0 +1,484 @@
+---
+title: 'Feature estimators'
+description: 'H2O feature engineering transformers that integrate with Spark ML Pipelines for dimensionality reduction, encoding, and representation learning.'
+keywords: ['target encoder', 'pca', 'word2vec', 'autoencoder', 'glrm', 'feature engineering', 'sparkling water']
+---
+
+Sparkling Water provides a set of H2O-powered feature transformers that implement the Spark ML `Estimator` / `Transformer` interfaces. They can be placed as stages in a `Pipeline` alongside any standard Spark ML component, and their models are persistable as MOJO for production deployment.
+
+<Note>
+All feature estimators accept individual simple-typed columns or Spark vector columns (`VectorUDT`) as input. This means you can chain the output of a standard Spark vectoriser directly into an H2O feature estimator.
+</Note>
+
+<AccordionGroup>
+
+<Accordion title="H2OTargetEncoder" id="h2otargetencoder">
+
+Target Encoder converts high-cardinality categorical columns to continuous values by replacing each category with the mean of the target (label) column for rows belonging to that category. This can significantly improve model accuracy when categorical features have many levels.
+
+**Example of encoding:**
+
+| Town | Label | Town_te |
+|---|---|---|
+| Chennai | 1 | 0.800 |
+| Prague | 0 | 0.286 |
+| Mountain View | 1 | 0.714 |
+
+**Key parameters**
+
+| Parameter | Description |
+|---|---|
+| `inputCols` | Categorical columns to encode |
+| `labelCol` | Target column used to compute encoding statistics |
+| `problemType` | `Classification` or `Regression` |
+| `noise` | Amount of noise added during training to prevent over-fitting |
+| `holdoutStrategy` | Strategy for preventing target leakage: `None`, `LeaveOneOut`, or `KFold` |
+
+**Edge cases**
+
+- The label column must not contain any `null` values.
+- Input columns may contain `null` values; they are treated as a separate category.
+- Novel values at inference time receive the prior average (or the posterior average of null rows if the training data contained nulls in that column).
+
+<Tip>
+When `H2OTargetEncoder` is used inside a `Pipeline`, the differentiation between training data (which requires noise / holdout) and test data is handled automatically. If you use it standalone, call `transformTrainingDataset` on the training frame rather than the standard `transform` method.
+</Tip>
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling._
+val hc = H2OContext.getOrCreate()
+
+import org.apache.spark.SparkFiles
+spark.sparkContext.addFile(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/prostate/prostate.csv")
+val sparkDF = spark.read.option("header", "true").option("inferSchema", "true")
+  .csv(SparkFiles.get("prostate.csv"))
+val Array(trainingDF, testingDF) = sparkDF.randomSplit(Array(0.8, 0.2))
+
+import ai.h2o.sparkling.ml.features.H2OTargetEncoder
+val targetEncoder = new H2OTargetEncoder()
+  .setInputCols(Array("RACE", "DPROS", "DCAPS"))
+  .setProblemType("Classification")
+  .setLabelCol("CAPSULE")
+
+import ai.h2o.sparkling.ml.algos.classification.H2OGBMClassifier
+import org.apache.spark.ml.Pipeline
+val gbm = new H2OGBMClassifier()
+  .setFeaturesCols(targetEncoder.getOutputCols())
+  .setLabelCol("CAPSULE")
+val pipeline = new Pipeline().setStages(Array(targetEncoder, gbm))
+
+val pipelineModel = pipeline.fit(trainingDF)
+pipelineModel.transform(testingDF).show()
+
+// Save and reload the pipeline model (MOJO-backed)
+import org.apache.spark.ml.PipelineModel
+pipelineModel.write.save("somePathForStoringPipelineModel")
+val loadedPipelineModel = PipelineModel.load("somePathForStoringPipelineModel")
+loadedPipelineModel.transform(testingDF).show()
+```
+
+```python Python
+from pysparkling import *
+hc = H2OContext.getOrCreate()
+
+import h2o
+frame = h2o.import_file(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/prostate/prostate.csv")
+sparkDF = hc.asSparkFrame(frame)
+[trainingDF, testingDF] = sparkDF.randomSplit([0.8, 0.2])
+
+from pysparkling.ml import H2OTargetEncoder
+targetEncoder = H2OTargetEncoder()\
+    .setInputCols(["RACE", "DPROS", "DCAPS"])\
+    .setLabelCol("CAPSULE")\
+    .setProblemType("Classification")
+
+from pysparkling.ml import H2OGBMClassifier
+from pyspark.ml import Pipeline
+gbm = H2OGBMClassifier()\
+    .setFeaturesCols(targetEncoder.getOutputCols())\
+    .setLabelCol("CAPSULE")
+pipeline = Pipeline(stages=[targetEncoder, gbm])
+
+pipelineModel = pipeline.fit(trainingDF)
+pipelineModel.transform(testingDF).show()
+
+# Save and reload the pipeline model (MOJO-backed)
+from pyspark.ml import PipelineModel
+pipelineModel.save("somePathForStoringPipelineModel")
+loadedPipelineModel = PipelineModel.load("somePathForStoringPipelineModel")
+loadedPipelineModel.transform(testingDF).show()
+```
+
+</CodeGroup>
+
+</Accordion>
+
+<Accordion title="H2OPCA — Principal Component Analysis" id="h2opca">
+
+Principal Component Analysis reduces the number of features by projecting the data onto a lower-dimensional subspace that captures the maximum variance. The output is a single Spark vector column containing `k` principal components.
+
+**Key parameters**
+
+| Parameter | Description |
+|---|---|
+| `inputCols` | Columns to reduce (simple types or `VectorUDT`) |
+| `k` | Number of principal components to produce |
+| `transform` | Transformation method: `None`, `Standardize`, `Normalize`, `Demean`, `Descale` |
+| `useAllFactorLevels` | Whether to use all factor levels (otherwise one is dropped) |
+| `imputeMissing` | Impute missing values before computing PCA |
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling._
+val hc = H2OContext.getOrCreate()
+
+import org.apache.spark.SparkFiles
+spark.sparkContext.addFile(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/prostate/prostate.csv")
+val rawSparkDF = spark.read.option("header", "true").option("inferSchema", "true")
+  .csv(SparkFiles.get("prostate.csv"))
+val sparkDF = rawSparkDF.withColumn("CAPSULE", $"CAPSULE" cast "string")
+val Array(trainingDF, testingDF) = sparkDF.randomSplit(Array(0.8, 0.2))
+
+import ai.h2o.sparkling.ml.features.H2OPCA
+val pca = new H2OPCA()
+pca.setInputCols(Array("RACE", "DPROS", "DCAPS", "PSA", "VOL", "GLEASON"))
+pca.setK(4)
+
+import ai.h2o.sparkling.ml.algos.H2OGBM
+val gbm = new H2OGBM()
+gbm.setFeaturesCol(pca.getOutputCol())
+gbm.setLabelCol("CAPSULE")
+
+import org.apache.spark.ml.Pipeline
+val pipeline = new Pipeline().setStages(Array(pca, gbm))
+val model = pipeline.fit(trainingDF)
+
+val resultDF = model.transform(testingDF)
+resultDF.show(truncate = false)
+```
+
+```python Python
+from pysparkling import *
+hc = H2OContext.getOrCreate()
+
+import h2o
+frame = h2o.import_file(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/prostate/prostate.csv")
+sparkDF = hc.asSparkFrame(frame)
+sparkDF = sparkDF.withColumn("CAPSULE", sparkDF.CAPSULE.cast("string"))
+[trainingDF, testingDF] = sparkDF.randomSplit([0.8, 0.2])
+
+from pysparkling.ml import H2OPCA
+pca = H2OPCA()
+pca.setInputCols(["RACE", "DPROS", "DCAPS", "PSA", "VOL", "GLEASON"])
+pca.setK(4)
+
+from pysparkling.ml import H2OGBM
+gbm = H2OGBM()
+gbm.setFeaturesCols([pca.getOutputCol()])
+gbm.setLabelCol("CAPSULE")
+
+from pyspark.ml import Pipeline
+pipeline = Pipeline(stages=[pca, gbm])
+model = pipeline.fit(trainingDF)
+
+resultDF = model.transform(testingDF)
+resultDF.show(truncate=False)
+```
+
+</CodeGroup>
+
+</Accordion>
+
+<Accordion title="H2OWord2Vec" id="h2oword2vec">
+
+Word2Vec trains dense vector representations of words from tokenised text. After training, it aggregates the word vectors for each row into a single numeric feature vector that downstream algorithms can consume. Commonly combined with Spark's `RegexTokenizer` and `StopWordsRemover`.
+
+**Key parameters**
+
+| Parameter | Description |
+|---|---|
+| `inputCol` | Column containing an array of word tokens |
+| `vecSize` | Dimensionality of the word vectors (default: 100) |
+| `epochs` | Number of training iterations over the corpus |
+| `sentSampleRate` | Sub-sampling rate for frequent words (0 disables) |
+| `windowSize` | Context window size |
+| `minWordFreq` | Minimum word frequency to include in vocabulary |
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling._
+val hc = H2OContext.getOrCreate()
+
+import org.apache.spark.SparkFiles
+spark.sparkContext.addFile(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/craigslistJobTitles.csv")
+val sparkDF = spark.read.option("header", "true").option("inferSchema", "true")
+  .csv(SparkFiles.get("craigslistJobTitles.csv"))
+val Array(trainingDF, testingDF) = sparkDF.randomSplit(Array(0.8, 0.2))
+
+import ai.h2o.sparkling.ml.algos.H2OGBM
+import ai.h2o.sparkling.ml.features.H2OWord2Vec
+import org.apache.spark.ml.Pipeline
+import org.apache.spark.ml.feature.{RegexTokenizer, StopWordsRemover}
+
+val tokenizer = new RegexTokenizer()
+  .setInputCol("jobtitle")
+  .setMinTokenLength(2)
+
+val stopWordsRemover = new StopWordsRemover()
+  .setInputCol(tokenizer.getOutputCol)
+
+val w2v = new H2OWord2Vec()
+  .setSentSampleRate(0)
+  .setEpochs(10)
+  .setInputCol(stopWordsRemover.getOutputCol)
+
+val gbm = new H2OGBM()
+  .setLabelCol("category")
+  .setFeaturesCols(w2v.getOutputCol)
+
+val pipeline = new Pipeline().setStages(Array(tokenizer, stopWordsRemover, w2v, gbm))
+val model = pipeline.fit(trainingDF)
+
+model.transform(testingDF).show(false)
+```
+
+```python Python
+from pysparkling import *
+hc = H2OContext.getOrCreate()
+
+import h2o
+frame = h2o.import_file(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/craigslistJobTitles.csv")
+sparkDF = hc.asSparkFrame(frame.set_names(['category', 'jobtitle']))
+[trainingDF, testingDF] = sparkDF.randomSplit([0.8, 0.2])
+
+from pysparkling.ml import H2OGBM, H2OWord2Vec
+from pyspark.ml import Pipeline
+from pyspark.ml.feature import RegexTokenizer, StopWordsRemover
+
+tokenizer = RegexTokenizer(inputCol="jobtitle", minTokenLength=2)
+stopWordsRemover = StopWordsRemover(inputCol=tokenizer.getOutputCol())
+w2v = H2OWord2Vec(sentSampleRate=0, epochs=10, inputCol=stopWordsRemover.getOutputCol())
+gbm = H2OGBM(labelCol="category", featuresCols=[w2v.getOutputCol()])
+
+pipeline = Pipeline(stages=[tokenizer, stopWordsRemover, w2v, gbm])
+model = pipeline.fit(trainingDF)
+
+model.transform(testingDF).show(truncate=False)
+```
+
+</CodeGroup>
+
+</Accordion>
+
+<Accordion title="H2OAutoEncoder" id="h2oautoencoder">
+
+The H2O AutoEncoder is built on H2O's Deep Learning algorithm. It can serve two purposes:
+
+1. **Feature encoding** — compress a set of input columns into a lower-dimensional numeric vector.
+2. **Anomaly detection** — compute the per-row mean squared reconstruction error (MSE). Rows with high MSE are likely anomalies.
+
+**Key parameters**
+
+| Parameter | Description |
+|---|---|
+| `inputCols` | Columns to encode |
+| `hidden` | Array specifying neurons per hidden layer |
+| `outputCol` | Name of the output encoded vector column |
+| `withMSECol` | Whether to add an MSE column to the output |
+| `mseCol` | Name for the MSE output column |
+| `withOriginalCol` | Whether to include the original reconstructed values |
+| `splitRatio` | Fraction of data used for training (remainder becomes validation) |
+
+**Use case 1: Feature encoding in a pipeline**
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling.ml.features.H2OAutoEncoder
+val autoEncoder = new H2OAutoEncoder()
+autoEncoder.setInputCols(Array("AGE", "RACE", "DPROS", "DCAPS"))
+autoEncoder.setHidden(Array(100))
+
+import ai.h2o.sparkling.ml.algos.H2OGBM
+val gbm = new H2OGBM()
+gbm.setFeaturesCol(autoEncoder.getOutputCol())
+gbm.setLabelCol("CAPSULE")
+
+import org.apache.spark.ml.Pipeline
+val pipeline = new Pipeline().setStages(Array(autoEncoder, gbm))
+val model = pipeline.fit(trainingDF)
+
+val resultDF = model.transform(testingDF)
+resultDF.show(truncate = false)
+```
+
+```python Python
+from pysparkling.ml import H2OAutoEncoder
+autoEncoder = H2OAutoEncoder()
+autoEncoder.setInputCols(["AGE", "RACE", "DPROS", "DCAPS"])
+autoEncoder.setHidden([100])
+
+from pysparkling.ml import H2OGBM
+gbm = H2OGBM()
+gbm.setFeaturesCols([autoEncoder.getOutputCol()])
+gbm.setLabelCol("CAPSULE")
+
+from pyspark.ml import Pipeline
+pipeline = Pipeline(stages=[autoEncoder, gbm])
+model = pipeline.fit(trainingDF)
+
+resultDF = model.transform(testingDF)
+resultDF.show(truncate=False)
+```
+
+</CodeGroup>
+
+**Use case 2: Anomaly detection via MSE**
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling.ml.features.H2OAutoEncoder
+val autoEncoder = new H2OAutoEncoder()
+autoEncoder.setInputCols(Array("RACE", "DPROS", "DCAPS"))
+autoEncoder.setOutputCol("Output")
+autoEncoder.setWithOriginalCol(true)
+autoEncoder.setOriginalCol("Original")
+autoEncoder.setWithMSECol(true)
+autoEncoder.setMSECol("MSE")
+autoEncoder.setHidden(Array(3))
+autoEncoder.setSplitRatio(0.8)
+
+val model = autoEncoder.fit(trainingDF)
+
+val threshold = 0.1
+val scoredDF = model.transform(testingDF)
+import org.apache.spark.sql.functions.col
+val outliersDF = scoredDF.filter(col("MSE") > threshold)
+outliersDF.show(truncate = false)
+
+println(model.getTrainingMetrics())
+println(model.getValidationMetrics())
+```
+
+```python Python
+from pysparkling.ml import H2OAutoEncoder
+autoEncoder = H2OAutoEncoder()
+autoEncoder.setInputCols(["RACE", "DPROS", "DCAPS"])
+autoEncoder.setOutputCol("Output")
+autoEncoder.setWithOriginalCol(True)
+autoEncoder.setOriginalCol("Original")
+autoEncoder.setWithMSECol(True)
+autoEncoder.setMSECol("MSE")
+autoEncoder.setHidden([3])
+autoEncoder.setSplitRatio(0.8)
+
+model = autoEncoder.fit(trainingDF)
+
+threshold = 0.1
+scoredDF = model.transform(testingDF)
+from pyspark.sql.functions import col
+outliersDF = scoredDF.filter(col("MSE") > threshold)
+outliersDF.show(truncate=False)
+
+print(model.getTrainingMetrics())
+print(model.getValidationMetrics())
+```
+
+</CodeGroup>
+
+</Accordion>
+
+<Accordion title="H2OGLRM — Generalized Low Rank Models" id="h2oglrm">
+
+Generalized Low Rank Models (GLRM) is a matrix factorisation method for dimensionality reduction. Unlike PCA, GLRM handles mixed data types (numeric, categorical, ordinal, binary) through a flexible framework of loss functions and regularisers. The output is a single Spark vector column of `k` latent factors.
+
+**Key parameters**
+
+| Parameter | Description |
+|---|---|
+| `inputCols` | Columns to factorise (simple types or `VectorUDT`) |
+| `k` | Number of latent factors (output dimensions) |
+| `loss` | Loss function for numeric columns (e.g., `Quadratic`, `Absolute`) |
+| `regularizationX` | Regularisation on the row factor matrix X |
+| `regularizationY` | Regularisation on the column factor matrix Y |
+| `transform` | Pre-processing transform: `None`, `Standardize`, `Normalize`, etc. |
+| `maxIterations` | Maximum optimisation iterations |
+| `seed` | Random seed |
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling._
+val hc = H2OContext.getOrCreate()
+
+import org.apache.spark.SparkFiles
+spark.sparkContext.addFile(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/prostate/prostate.csv")
+val rawSparkDF = spark.read.option("header", "true").option("inferSchema", "true")
+  .csv(SparkFiles.get("prostate.csv"))
+val sparkDF = rawSparkDF.withColumn("CAPSULE", $"CAPSULE" cast "string")
+val Array(trainingDF, testingDF) = sparkDF.randomSplit(Array(0.8, 0.2))
+
+import ai.h2o.sparkling.ml.features.H2OGLRM
+val glrm = new H2OGLRM()
+glrm.setInputCols(Array("RACE", "DPROS", "DCAPS", "PSA", "VOL", "GLEASON"))
+glrm.setK(4)
+
+import ai.h2o.sparkling.ml.algos.H2OGBM
+val gbm = new H2OGBM()
+gbm.setFeaturesCol(glrm.getOutputCol())
+gbm.setLabelCol("CAPSULE")
+
+import org.apache.spark.ml.Pipeline
+val pipeline = new Pipeline().setStages(Array(glrm, gbm))
+val model = pipeline.fit(trainingDF)
+
+val resultDF = model.transform(testingDF)
+resultDF.show(truncate = false)
+```
+
+```python Python
+from pysparkling import *
+hc = H2OContext.getOrCreate()
+
+import h2o
+frame = h2o.import_file(
+  "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/prostate/prostate.csv")
+sparkDF = hc.asSparkFrame(frame)
+sparkDF = sparkDF.withColumn("CAPSULE", sparkDF.CAPSULE.cast("string"))
+[trainingDF, testingDF] = sparkDF.randomSplit([0.8, 0.2])
+
+from pysparkling.ml import H2OGLRM
+glrm = H2OGLRM()
+glrm.setInputCols(["RACE", "DPROS", "DCAPS", "PSA", "VOL", "GLEASON"])
+glrm.setK(4)
+
+from pysparkling.ml import H2OGBM
+gbm = H2OGBM()
+gbm.setFeaturesCols([glrm.getOutputCol()])
+gbm.setLabelCol("CAPSULE")
+
+from pyspark.ml import Pipeline
+pipeline = Pipeline(stages=[glrm, gbm])
+model = pipeline.fit(trainingDF)
+
+resultDF = model.transform(testingDF)
+resultDF.show(truncate=False)
+```
+
+</CodeGroup>
+
+</Accordion>
+
+</AccordionGroup>

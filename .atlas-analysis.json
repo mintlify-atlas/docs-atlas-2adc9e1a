@@ -1,23 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "Sparkling Water",
+  "projectType": "sdk-library",
+  "projectName": "Sparkling Water",
+  "projectDescription": "Sparkling Water integrates H2O's fast, scalable machine learning engine with Apache Spark, enabling ML workflows across Scala, Python, and R.",
   "theme": "palm",
-  "colors": {
-    "primary": "#0277BD",
-    "light": "#E1F5FE",
-    "dark": "#01579B"
-  },
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/h2oai/sparkling-water"
-    }
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/h2oai/sparkling-water"
-    }
-  },
+  "primaryColor": "#0277BD",
+  "lightColor": "#E1F5FE",
+  "darkColor": "#01579B",
   "navigation": {
     "tabs": [
       {
@@ -99,5 +87,27 @@
         ]
       }
     ]
-  }
+  },
+  "keyFeatures": [
+    "Seamless integration of H2O-3 machine learning engine with Apache Spark clusters",
+    "Bidirectional data conversion between Spark DataFrames/RDDs and H2O Frames",
+    "Multi-language support: Scala, Python (PySparkling), and R (RSparkling)",
+    "Internal and external backend deployment modes for flexible cluster topologies",
+    "Spark ML pipeline-compatible H2O algorithm wrappers",
+    "MOJO model scoring without full H2O dependency",
+    "Kubernetes and cloud platform support (AWS EMR, Azure HDI, Databricks, GCP Dataproc)",
+    "H2O AutoML integration for automated model selection and hyperparameter tuning"
+  ],
+  "publicApiSurface": [
+    "H2OContext.getOrCreate(conf?)",
+    "H2OConf (SparkConf wrapper with H2O-specific properties)",
+    "H2OContext.asH2OFrame(dataFrame)",
+    "H2OContext.asSparkFrame(h2oFrame)",
+    "H2OAutoML / H2OSupervisedAlgorithm Spark ML estimators",
+    "H2OGLM, H2OGBM, H2ODRF, H2OXGBoost, H2ODeepLearning estimators",
+    "H2OTargetEncoder, H2OPCA, H2OWord2Vec feature transformers",
+    "H2OMOJOModel / H2OPipelineMOJOModel for lightweight scoring",
+    "ai.h2o:sparkling-water-core_{{scala_version}}:{{version}} Maven artifact",
+    "h2o_pysparkling_{{spark_version}} PyPI package"
+  ]
 }

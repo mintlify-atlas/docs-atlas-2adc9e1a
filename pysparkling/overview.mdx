@@ -1,0 +1,121 @@
+---
+title: "PySparkling Overview"
+description: "PySparkling integrates Python with Sparkling Water, letting you start H2O services on a Spark cluster and run H2O algorithms from a Python API."
+keywords: ["pysparkling", "h2o", "spark", "python", "h2ocontext", "h2oconf"]
+---
+
+## What is PySparkling?
+
+PySparkling is an integration of Python with Sparkling Water. It allows you to start H2O services on a Spark cluster from a Python API and combine PySpark data pipelines with H2O machine learning algorithms.
+
+In a PySparkling driver program, the PySpark `SparkContext` uses **Py4J** to start the driver JVM and a Java-side Spark context. That Java context is then used to create an `H2OContext`, which in turn starts an H2O cluster inside the Spark executor JVMs. Once the H2O cluster is running, the standard H2O Python package communicates with it through H2O's REST API. This means all pure H2O calls (model training, frame manipulation, predictions) go through JSON-over-HTTP, while data conversion between Spark DataFrames and H2O frames happens in-process without network overhead.
+
+```
+Python process
+  └─ PySpark SparkContext (Py4J ──► Java SparkContext)
+       └─ H2OContext.getOrCreate()
+            └─ H2O cluster nodes (co-located with Spark Executors)
+                 └─ REST API ◄──► H2O Python package
+```
+
+PySparkling programs can run as a submitted application (`spark-submit`), interactively in the `bin/pysparkling` shell, or in a notebook environment such as Jupyter or Databricks.
+
+## How Sparkling Water places H2O in Spark
+
+A Spark cluster has one Driver JVM and one or more Executor JVMs. When `H2OContext.getOrCreate()` is called, Sparkling Water starts an H2O node inside each Executor JVM. The resulting H2O cluster has the same topology as the Spark cluster, with H2O nodes and Spark executors sharing the same JVMs.
+
+Data conversion works in two directions:
+
+- **Spark DataFrame → H2OFrame**: A full data copy is performed because Spark stores data in row-oriented blocks while H2O stores data in a columnar compressed format. Because H2O's compression is effective, the overhead is typically low.
+- **H2OFrame → Spark DataFrame**: Sparkling Water creates a lightweight wrapper around the H2OFrame that exposes the Spark DataFrame API. No data is duplicated; the wrapper reads directly from the underlying H2OFrame.
+
+## Public API
+
+The `pysparkling` package exposes two classes:
+
+| Class | Description |
+|---|---|
+| `H2OContext` | Connects to the H2O cluster running inside Spark. Use `H2OContext.getOrCreate()` to start or attach to an existing cluster. Provides `asH2OFrame()` and `asSparkFrame()` for data conversion. |
+| `H2OConf` | Configuration object for tuning H2O and Sparkling Water settings before creating `H2OContext`. Wraps Spark configuration properties with typed setter/getter methods. |
+
+Both classes are importable directly from `pysparkling`:
+
+```python
+from pysparkling import H2OContext, H2OConf
+```
+
+or with a wildcard import:
+
+```python
+from pysparkling import *
+```
+
+## Installation
+
+PySparkling packages are versioned to match specific Spark major versions. Install the package that matches the Spark version running in your environment.
+
+<Info>
+  The package name suffix encodes the target Spark version. For example,
+  `h2o_pysparkling_3.5` is built for Spark 3.5, `h2o_pysparkling_3.4` for
+  Spark 3.4, and so on. Always install the package whose suffix matches your
+  cluster's Spark major version — mixing versions will cause runtime errors.
+</Info>
+
+<CodeGroup>
+
+```bash Spark 3.5
+pip install h2o_pysparkling_3.5
+```
+
+```bash Spark 3.4
+pip install h2o_pysparkling_3.4
+```
+
+```bash Spark 3.3
+pip install h2o_pysparkling_3.3
+```
+
+```bash Spark 3.2
+pip install h2o_pysparkling_3.2
+```
+
+```bash Spark 3.1
+pip install h2o_pysparkling_3.1
+```
+
+```bash Spark 3.0
+pip install h2o_pysparkling_3.0
+```
+
+</CodeGroup>
+
+Installing from PyPI automatically resolves the two runtime dependencies (`requests` and `tabulate`). If you install from the source zip file, add them manually:
+
+```bash
+pip install requests tabulate
+```
+
+## Version compatibility
+
+| PySparkling package | Spark version |
+|---|---|
+| `h2o_pysparkling_3.5` | Apache Spark 3.5 |
+| `h2o_pysparkling_3.4` | Apache Spark 3.4 |
+| `h2o_pysparkling_3.3` | Apache Spark 3.3 |
+| `h2o_pysparkling_3.2` | Apache Spark 3.2 |
+| `h2o_pysparkling_3.1` | Apache Spark 3.1 |
+| `h2o_pysparkling_3.0` | Apache Spark 3.0 |
+| `h2o_pysparkling_2.4` | Apache Spark 2.4 |
+| `h2o_pysparkling_2.3` | Apache Spark 2.3 |
+
+PySparkling requires Python 3.6 or higher. You also need a working Apache Spark installation accessible from your Python environment via the `SPARK_HOME` environment variable.
+
+## Scoring-only package
+
+If you only need to score existing MOJO models (from H2O-3, Sparkling Water, or Driverless AI) without training new models, a smaller package is available:
+
+```bash
+pip install h2o_pysparkling_scoring_3.5
+```
+
+This package does not include the H2O training runtime, which significantly reduces its size. Replace the `3.5` suffix with your Spark version.

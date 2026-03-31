@@ -1,0 +1,473 @@
+---
+title: "MOJO Model Scoring"
+description: "Load and score H2O MOJO models (H2O-3 and Driverless AI) in Spark without running a full H2O cluster. Covers H2OMOJOModel, H2OMOJOPipelineModel, the scoring package, and available prediction settings."
+keywords: ["MOJO", "H2OMOJOModel", "H2OMOJOPipelineModel", "scoring", "H2O-3", "Driverless AI", "spark scoring"]
+---
+
+MOJO (Model Object, Optimized) is a portable, self-contained model format that H2O and Driverless AI produce after training. Sparkling Water can load and score MOJO models inside Spark **without requiring a running H2O cluster** — only the scoring package is needed on the classpath.
+
+<Info>
+Sparkling Water is backward compatible with MOJO versions produced by earlier H2O-3 and Driverless AI releases.
+</Info>
+
+---
+
+## H2O-3 MOJO models
+
+### Start a scoring environment
+
+To score H2O-3 MOJO models, start a Spark session with the Sparkling Water scoring assembly on the classpath.
+
+<Tabs>
+  <Tab title="Scala">
+
+Using the scoring-only assembly (no H2OContext needed):
+
+```bash
+./bin/spark-shell \
+  --jars jars/sparkling-water-assembly-scoring_SCALA_VERSION-SW_VERSION-all.jar
+```
+
+Or use the Sparkling Water convenience script (also puts the scoring JAR on the classpath):
+
+```bash
+./bin/sparkling-shell
+```
+
+<Note>
+If you also need to train H2O-3/SW models in the same session, use the full assembly JAR instead:
+
+`jars/sparkling-water-assembly_SCALA_VERSION-SW_VERSION-all.jar`
+</Note>
+
+  </Tab>
+  <Tab title="Python">
+
+Using the scoring-only PySparkling zip:
+
+```bash
+./bin/pyspark \
+  --py-files py/h2o_pysparkling_scoring_SPARK_MAJOR_VERSION-SW_VERSION.zip
+```
+
+Or use the PySparkling convenience script:
+
+```bash
+./bin/pysparkling
+```
+
+<Note>
+If you also need to train H2O-3/SW models, use the full PySparkling zip instead:
+
+`py/h2o_pysparkling_SPARK_MAJOR_VERSION-SW_VERSION.zip`
+</Note>
+
+  </Tab>
+</Tabs>
+
+### Load a MOJO model
+
+`H2OMOJOModel.createFromMojo` accepts any data source path that Spark supports: local filesystem, HDFS, S3, and others.
+
+**Relative path** (resolves to HDFS home directory when HDFS is enabled, or current working directory otherwise):
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling.ml.models._
+val model = H2OMOJOModel.createFromMojo("prostate_mojo.zip")
+```
+
+```python Python
+from pysparkling.ml import *
+model = H2OMOJOModel.createFromMojo("prostate_mojo.zip")
+```
+
+</CodeGroup>
+
+**Absolute local path:**
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling.ml.models._
+val model = H2OMOJOModel.createFromMojo("/Users/peter/prostate_mojo.zip")
+```
+
+```python Python
+from pysparkling.ml import *
+model = H2OMOJOModel.createFromMojo("/Users/peter/prostate_mojo.zip")
+```
+
+</CodeGroup>
+
+**Absolute HDFS path:**
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling.ml.models._
+val model = H2OMOJOModel.createFromMojo("/user/peter/prostate_mojo.zip")
+```
+
+```python Python
+from pysparkling.ml import *
+model = H2OMOJOModel.createFromMojo("/user/peter/prostate_mojo.zip")
+```
+
+</CodeGroup>
+
+**Explicit schema (HDFS or local file):**
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling.ml.models._
+// HDFS
+val modelHDFS = H2OMOJOModel.createFromMojo("hdfs:///user/peter/prostate_mojo.zip")
+// Local file
+val modelLocal = H2OMOJOModel.createFromMojo("file:///Users/peter/prostate_mojo.zip")
+```
+
+```python Python
+from pysparkling.ml import *
+# HDFS
+modelHDFS = H2OMOJOModel.createFromMojo("hdfs:///user/peter/prostate_mojo.zip")
+# Local file
+modelLocal = H2OMOJOModel.createFromMojo("file:///Users/peter/prostate_mojo.zip")
+```
+
+</CodeGroup>
+
+### Configure MOJO settings at load time
+
+The loaded model is immutable. Configure scoring behavior via `H2OMOJOSettings` at creation time:
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling.ml.models._
+val settings = H2OMOJOSettings(
+  convertUnknownCategoricalLevelsToNa = true,
+  convertInvalidNumbersToNa = true
+)
+val model = H2OMOJOModel.createFromMojo("prostate_mojo.zip", settings)
+```
+
+```python Python
+from pysparkling.ml import *
+settings = H2OMOJOSettings(
+    convertUnknownCategoricalLevelsToNa=True,
+    convertInvalidNumbersToNa=True
+)
+model = H2OMOJOModel.createFromMojo("prostate_mojo.zip", settings)
+```
+
+</CodeGroup>
+
+### Score a dataset
+
+<CodeGroup>
+
+```scala Scala
+model.transform(dataset)
+```
+
+```python Python
+model.transform(dataset)
+```
+
+</CodeGroup>
+
+The output DataFrame contains all original columns plus a `prediction` column (for classification: predicted label; for regression: predicted value) and optionally a `detailed_prediction` column with probabilities, Shapley values, and other details.
+
+### Saving and reloading a MOJO model
+
+**Save:**
+
+```scala
+model.write.save("/some/path")
+```
+
+On a Hadoop-enabled system, this uses HDFS by default. To write to the local filesystem, prefix with `file://`.
+
+**Load:**
+
+```scala
+H2OMOJOModel.read.load("/some/path")
+```
+
+### Algorithm-specific MOJO types
+
+`createFromMojo` returns an `H2OMOJOModel` base class. To access algorithm-specific properties in Scala, use the typed variant:
+
+```scala
+import ai.h2o.sparkling.ml.models._
+val specificModel = H2OGBMMOJOModel.createFromMojo("prostate_mojo.zip")
+println(s"Ntrees: ${specificModel.getNTrees()}")
+```
+
+Available specific model types:
+
+- `H2OXGBoostMOJOModel`
+- `H2OGBMMOJOModel`
+- `H2ODRFMOJOModel`
+- `H2OGLMMOJOModel`
+- `H2OGAMMOJOModel`
+- `H2ODeepLearningMOJOModel`
+- `H2OKMeansMOJOModel`
+- `H2OIsolationForestMOJOModel`
+- `H2OExtendedIsolationForestMOJOModel`
+- `H2OCoxPHMOJOModel`
+- `H2OTargetEncoderMOJOModel`
+- `H2OAutoEncoderMOJOModel`
+
+### Available `H2OMOJOSettings` options
+
+| Option | Default | Description |
+|---|---|---|
+| `predictionCol` | `prediction` | Name of the generated prediction column |
+| `detailedPredictionCol` | `detailed_prediction` | Name of the detailed prediction column (probabilities, Shapley values, etc.) |
+| `convertUnknownCategoricalLevelsToNa` | `false` | Convert unseen categorical values to NA instead of failing |
+| `convertInvalidNumbersToNa` | `false` | Convert invalid numeric values to NA instead of failing |
+| `withContributions` | `false` | Include Shapley values in `detailed_prediction` (tree-based binomial and regression models only) |
+| `withLeafNodeAssignments` | `false` | Include leaf node assignments in `detailed_prediction` |
+| `withStageResults` | `false` | Include per-tree stage results in `detailed_prediction` (not supported by XGBoost) |
+| `dataFrameSerializer` | — | Full class name of a custom serializer for `NullableDataFrameParam` |
+
+### Model introspection methods
+
+| Method | Returns |
+|---|---|
+| `getDomainValues()` | Map from column name to its domain (array of values) |
+| `getModelCategory()` | Model category: `binomial`, `multinomial`, `regression`, etc. |
+| `getFeatureTypes()` | Map from feature name to type (`enum`, `numeric`, `string`, etc.) |
+| `getFeatureImportances()` | DataFrame with relative importance, scaled importance, and percentage |
+| `getScoringHistory()` | DataFrame describing model evolution during training |
+| `getTrainingMetrics()` | Map from metric name to double value |
+| `getValidationMetrics()` | Map from metric name to double value |
+| `getCrossValidationMetrics()` | Map from metric name to double value |
+| `getCurrentMetrics()` | Cross-validation metrics if available, else validation, else training |
+| `getCrossValidationMetricsSummary()` | DataFrame with per-fold metric performance |
+| `getCrossValidationModels()` | Sequence of cross-validation MOJO models (not available in R API) |
+
+---
+
+## Driverless AI MOJO pipeline models
+
+Driverless AI produces MOJO scoring pipelines (`pipeline.mojo`) that can be run in Spark via `H2OMOJOPipelineModel`.
+
+<Warning>
+A valid Driverless AI license file (`license.sig`) must be passed to Spark via `--jars`. In local Spark mode, use `--driver-class-path` instead.
+</Warning>
+
+### Prepare the MOJO file
+
+Extract `pipeline.mojo` from the `mojo.zip` archive downloaded from Driverless AI:
+
+```bash
+unzip /path/to/mojo.zip -d /tmp/mojo.zip.extracted
+cp /tmp/mojo.zip.extracted/mojo-pipeline/pipeline.mojo /path/to/pipeline.mojo
+```
+
+### Start a scoring environment
+
+<Tabs>
+  <Tab title="Scala">
+
+Using the scoring-only assembly with a license:
+
+```bash
+./bin/spark-shell \
+  --jars license.sig,jars/sparkling-water-assembly-scoring_SCALA_VERSION-SW_VERSION-all.jar
+```
+
+Or with the Sparkling Water shell:
+
+```bash
+./bin/sparkling-shell --jars license.sig
+```
+
+  </Tab>
+  <Tab title="Python">
+
+```bash
+./bin/pyspark \
+  --jars license.sig \
+  --py-files py/h2o_pysparkling_scoring_SPARK_MAJOR_VERSION-SW_VERSION.zip
+```
+
+Or:
+
+```bash
+./bin/pysparkling --jars license.sig
+```
+
+  </Tab>
+</Tabs>
+
+### Load and score a MOJO pipeline
+
+<Steps>
+  <Step title="Load the MOJO pipeline model">
+
+    <CodeGroup>
+
+    ```scala Scala
+    import ai.h2o.sparkling.ml.models._
+    val settings = H2OMOJOSettings(predictionCol = "fruit_type")
+    val mojo = H2OMOJOPipelineModel.createFromMojo("file:///path/to/pipeline.mojo", settings)
+    ```
+
+    ```python Python
+    from pysparkling.ml import *
+    settings = H2OMOJOSettings(predictionCol="fruit_type")
+    mojo = H2OMOJOPipelineModel.createFromMojo("file:///path/to/pipeline.mojo", settings)
+    ```
+
+    </CodeGroup>
+
+    The `settings` argument is optional. If omitted, default values are used.
+  </Step>
+  <Step title="Load the dataset to score">
+
+    <CodeGroup>
+
+    ```scala Scala
+    val dataFrame = spark.read
+      .option("header", "true")
+      .option("inferSchema", "true")
+      .csv("file:///path/to/data.csv")
+    ```
+
+    ```python Python
+    dataFrame = spark.read \
+        .option("header", "true") \
+        .option("inferSchema", "true") \
+        .csv("file:///path/to/data.csv")
+    ```
+
+    </CodeGroup>
+  </Step>
+  <Step title="Run predictions">
+
+    <CodeGroup>
+
+    ```scala Scala
+    val predictions = mojo.transform(dataFrame)
+    predictions.select("prediction")
+    ```
+
+    ```python Python
+    predictions = mojo.transform(dataFrame)
+    predictions.select("prediction")
+    ```
+
+    </CodeGroup>
+
+    The output DataFrame contains all original columns plus the prediction column. The prediction column contains sub-columns named after the output columns Driverless AI identified (e.g., `AGE` for a regression problem, or `VALID.0` / `VALID.1` for binary classification).
+  </Step>
+</Steps>
+
+### `H2OMOJOSettings` options for pipeline models
+
+| Option | Default | Description |
+|---|---|---|
+| `predictionCol` | `prediction` | Name of the generated prediction column |
+| `withContributions` | `false` | Append a `contributions` column with Shapley values for original features |
+| `withInternalContributions` | `false` | Append an `internal_contributions` column with Shapley values for transformed features |
+| `withPredictionInterval` | `false` | Append prediction interval columns under the prediction column |
+| `scoringBulkSize` | — | Number of records passed at once to the MOJO2 runtime library |
+
+### Overriding the MOJO2 runtime
+
+Both the full distribution and the scoring package bundle MOJO2 Runtime Implementation (`ai.h2o:mojo2-runtime-impl`). To override it with a specific version, add the MOJO2 JAR **before** the Sparkling Water scoring JAR:
+
+<Tabs>
+  <Tab title="Scala">
+
+```bash
+./bin/spark-shell \
+  --jars license.sig,mojo2-runtime-impl-2.7.5.jar,jars/sparkling-water-assembly-scoring_SCALA_VERSION-SW_VERSION-all.jar
+```
+
+  </Tab>
+  <Tab title="Python">
+
+```bash
+./bin/pyspark \
+  --jars license.sig,mojo2-runtime-impl-2.7.5.jar \
+  --py-files py/h2o_pysparkling_scoring_SPARK_MAJOR_VERSION-SW_VERSION.zip
+```
+
+  </Tab>
+</Tabs>
+
+### Troubleshooting
+
+**`java.io.IOException: MOJO doesn't contain resource mojo/pipeline.pb`**
+
+An incompatible `mojo-runtime.jar` is on the classpath. Remove it — Sparkling Water already bundles the correct runtime.
+
+**`java.io.IOException: None of 2 available pipeline factories [pbuf, toml] can read this mojo.`**
+
+You passed the entire `mojo.zip` archive to `createFromMojo` instead of the `pipeline.mojo` file contained inside it. Extract the archive and pass the path to `pipeline.mojo` directly.
+
+**`ClassCastException` involving `Float32` and `Long`**
+
+Call `getFeatureTypes()` to identify the column with a type mismatch, then manually cast it from `Long` to `Double` or `Integer` in your DataFrame before scoring.
+
+---
+
+## Deploying PySparkling pipeline models
+
+When you train a PySparkling `Pipeline` that includes an H2O stage (such as `H2OGBM`), the exported pipeline uses MOJO internally. You can reload and score this pipeline without initializing `H2OContext`.
+
+<Steps>
+  <Step title="Train and export the pipeline">
+    ```python
+    from pyspark.ml import Pipeline
+    from pysparkling import *
+    from pysparkling.ml import *
+
+    hc = H2OContext.getOrCreate()
+
+    data = spark.createDataFrame(
+        spark.sparkContext.textFile("examples/smalldata/smsData.txt")
+            .map(lambda x: x.split("\t", 1))
+            .filter(lambda r: r[0].strip()),
+        ["label", "text"]
+    )
+
+    gbm = H2OGBM(splitRatio=0.8, seed=1, labelCol="label")
+    pipeline = Pipeline(stages=[gbm])
+    model = pipeline.fit(data)
+    model.save("exported_model")
+    ```
+  </Step>
+  <Step title="Start a new session (no H2OContext needed)">
+    Open a new `./pysparkling` shell. You do not need to create `H2OContext` — the H2O stage scores using MOJO at runtime.
+  </Step>
+  <Step title="Initialize PySparkling">
+    Distribute the required Java classes to the Spark cluster:
+
+    ```python
+    from pysparkling.initializer import Initializer
+    Initializer.load_sparkling_jar(spark)
+    ```
+
+    <Warning>
+    If you skip this step, Spark will raise a `class not found` exception when loading the model because it will not know about the required Sparkling Water classes.
+    </Warning>
+  </Step>
+  <Step title="Load and use the pipeline model">
+    ```python
+    from pyspark.ml import PipelineModel
+
+    model = PipelineModel.load("exported_model")
+
+    df_for_predictions = ...
+    model.transform(df_for_predictions)
+    ```
+  </Step>
+</Steps>

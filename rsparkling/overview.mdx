@@ -1,0 +1,164 @@
+---
+title: "RSparkling Overview"
+description: "RSparkling is an R front-end for Sparkling Water that brings H2O's distributed machine learning algorithms to R via Apache Spark."
+keywords: ["rsparkling", "sparklyr", "h2o", "spark", "machine learning", "R"]
+---
+
+RSparkling is an extension package for [sparklyr](http://spark.rstudio.com) that creates an R front-end for the Sparkling Water package from H2O. It provides an interface to H2O's high-performance, distributed machine learning algorithms on Spark, using R.
+
+## How it works
+
+RSparkling uses two complementary packages in tandem:
+
+- **sparklyr** handles Spark job deployment and initialization of Sparkling Water.
+- **h2o** (the H2O R package) is used for all modeling and data operations once the cluster is running.
+
+This design means you get the full power of the H2O machine learning ecosystem with a familiar R interface, while Spark handles distributed data processing and cluster management.
+
+## Key functionality
+
+<Columns cols={2}>
+  <Card title="H2OContext" icon="circle-play">
+    Create and manage an H2OContext connected to your Spark cluster using `H2OContext.getOrCreate()`.
+  </Card>
+  <Card title="H2O Flow UI" icon="browser">
+    Open the H2O Flow web interface directly from R with `hc$openFlow()` for interactive model exploration.
+  </Card>
+  <Card title="DataFrame conversion" icon="arrow-right-arrow-left">
+    Convert Spark DataFrames to H2O Frames with `hc$asH2OFrame()` and back with `hc$asSparkFrame()`.
+  </Card>
+  <Card title="H2O ML algorithms" icon="chart-line">
+    Use the full H2O algorithm suite — GBM, Deep Learning, GLM, AutoML, and more — directly from R.
+  </Card>
+</Columns>
+
+## Required packages
+
+RSparkling depends on three R packages working together:
+
+| Package | Purpose |
+|---|---|
+| `sparklyr` | Spark connection and job management |
+| `h2o` | H2O machine learning algorithms and Frame operations |
+| `rsparkling` | Connector that bridges sparklyr and H2O |
+
+## Version compatibility
+
+<Note>
+The RSparkling version must match the Spark major version you are using. For example, RSparkling built for Spark 3.3 requires a Spark 3.3.x installation. Always verify compatibility before installing.
+</Note>
+
+RSparkling releases are organized by Spark major version. When installing from the H2O S3 repository, the URL path includes the Spark major version:
+
+```
+http://h2o-release.s3.amazonaws.com/sparkling-water/spark-{SPARK_MAJOR}/
+```
+
+Supported Spark versions have corresponding RSparkling releases at:
+- Spark 3.3 — `http://docs.h2o.ai/sparkling-water/3.3/latest-stable/doc/rsparkling.html`
+- Spark 3.2 — `http://docs.h2o.ai/sparkling-water/3.2/latest-stable/doc/rsparkling.html`
+- Spark 3.1 — `http://docs.h2o.ai/sparkling-water/3.1/latest-stable/doc/rsparkling.html`
+- Spark 3.0 — `http://docs.h2o.ai/sparkling-water/3.0/latest-stable/doc/rsparkling.html`
+
+## Installation
+
+<Steps>
+  <Step title="Install sparklyr">
+    Install the latest stable version of sparklyr from CRAN:
+
+    ```r
+    install.packages("sparklyr")
+    ```
+  </Step>
+
+  <Step title="Install Spark via sparklyr">
+    Use sparklyr to download and install the appropriate Spark version. Replace `3.3` with the Spark version that matches your target RSparkling release:
+
+    ```r
+    library(sparklyr)
+    spark_install(version = "3.3")
+    ```
+
+    <Note>
+    This step requires internet access. If you are behind a firewall, download Spark manually from [spark.apache.org/downloads.html](https://spark.apache.org/downloads.html), unzip it, and set the `SPARK_HOME` environment variable:
+
+    ```r
+    Sys.setenv(SPARK_HOME = "/path/to/spark")
+    ```
+    </Note>
+  </Step>
+
+  <Step title="Prepare your environment for H2O">
+    Remove any previously installed H2O packages and install H2O's dependencies:
+
+    ```r
+    # Remove previously installed H2O packages
+    if ("package:h2o" %in% search()) { detach("package:h2o", unload = TRUE) }
+    if ("h2o" %in% rownames(installed.packages())) { remove.packages("h2o") }
+
+    # Install packages H2O depends on
+    pkgs <- c("methods", "statmod", "stats", "graphics", "RCurl", "jsonlite", "tools", "utils")
+    for (pkg in pkgs) {
+        if (!(pkg %in% rownames(installed.packages()))) { install.packages(pkg) }
+    }
+    ```
+  </Step>
+
+  <Step title="Install H2O">
+    Install H2O from CRAN or from H2O's S3 release repository. Installing from S3 guarantees you get the exact version required by your RSparkling release:
+
+    ```r
+    # Install from H2O's S3 repository (replace release name and build number)
+    install.packages(
+      "h2o",
+      type  = "source",
+      repos = "http://h2o-release.s3.amazonaws.com/h2o/rel-{H2O_RELEASE_NAME}/{H2O_BUILD_NUMBER}/R"
+    )
+    ```
+
+    <Tip>
+    The correct H2O version for your RSparkling release is specified in the RSparkling release notes. Using a mismatched H2O version will cause runtime errors.
+    </Tip>
+  </Step>
+
+  <Step title="Install RSparkling">
+    Install RSparkling from H2O's S3 release repository. Replace `{SPARK_MAJOR}` and `{SW_VERSION}` with your target values:
+
+    ```r
+    install.packages(
+      "rsparkling",
+      type  = "source",
+      repos = "http://h2o-release.s3.amazonaws.com/sparkling-water/spark-{SPARK_MAJOR}/{SW_VERSION}/R"
+    )
+    ```
+  </Step>
+</Steps>
+
+## Enabling RSparkling
+
+Load the rsparkling package before calling `spark_connect`. The `library(rsparkling)` call automatically registers the Sparkling Water extension with sparklyr:
+
+```r
+library(rsparkling)
+```
+
+<Warning>
+`library(rsparkling)` must be called before `spark_connect()`. Calling it after connecting to Spark will not register the extension correctly.
+</Warning>
+
+## Additional resources
+
+<Columns cols={2}>
+  <Card title="H2O documentation" icon="book" href="http://docs.h2o.ai">
+    Main H2O documentation site covering all algorithms and configuration options.
+  </Card>
+  <Card title="H2O R booklet" icon="file-pdf" href="http://docs.h2o.ai/h2o/latest-stable/h2o-docs/booklets/RBooklet.pdf">
+    Machine Learning with R and H2O — a comprehensive PDF booklet.
+  </Card>
+  <Card title="RSparkling examples" icon="code" href="https://github.com/h2oai/sparkling-water/blob/master/r/src/inst/examples/example_rsparkling.R">
+    Example R scripts in the sparkling-water GitHub repository.
+  </Card>
+  <Card title="H2O tutorials" icon="graduation-cap" href="https://github.com/h2oai/h2o-tutorials">
+    Community tutorials covering grid search, model selection, and more.
+  </Card>
+</Columns>

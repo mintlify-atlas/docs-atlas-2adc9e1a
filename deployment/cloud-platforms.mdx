@@ -1,0 +1,396 @@
+---
+title: "Cloud Platforms"
+description: "Deploy Sparkling Water on major cloud platforms including AWS EMR, Azure HDInsight, Azure Databricks, and Google Cloud Dataproc."
+keywords: ["sparkling water", "AWS EMR", "Azure HDInsight", "Azure Databricks", "Google Cloud Dataproc", "cloud deployment"]
+---
+
+Sparkling Water runs on all major cloud platforms. This page covers setup for each supported platform.
+
+<Tabs>
+  <Tab title="AWS EMR">
+
+## AWS EMR
+
+Sparkling Water can be deployed on Amazon EMR using a CloudFormation template. You can provision the cluster through the AWS Marketplace UI.
+
+<Warning>
+Add the following Spark configuration to all EMR jobs. Without it, Sparkling Water may not start correctly:
+
+```
+--conf spark.dynamicAllocation.enabled=false
+--conf spark.scheduler.minRegisteredResourcesRatio=1
+```
+
+For EMR 5.32.0 and newer, also add:
+
+```
+--conf spark.yarn.heterogeneousExecutors.enabled=false
+```
+</Warning>
+
+<Steps>
+  <Step title="Find H2O in the AWS Marketplace">
+    Log in to the [AWS Marketplace](https://aws.amazon.com/marketplace/) and search for **H2O**. Select **H2O Artificial Intelligence** to open the listing.
+
+    Review the two delivery methods available:
+    - **H2O Cluster of VM** — VPC, subnets, and network security groups are created automatically.
+    - **H2O Cluster of VM - Bring your own VPC** — network security groups, subnets, and internet gateways are managed by you.
+
+    Click **Continue** to proceed to the Launch on EC2 page.
+  </Step>
+  <Step title="Configure the launch options">
+    On the **Manual Launch** tab:
+    - Select your preferred offering.
+    - Select the target region.
+    - Specify a deployment option.
+
+    Click **Launch with CloudFormation Console**.
+  </Step>
+  <Step title="Select the EMR template">
+    On the **Select Template** page, enter the following URL in the **Specify an Amazon S3 template URL** field:
+
+    ```
+    https://s3-us-west-2.amazonaws.com/h2o-cloud/aws-template/TemplateEMR.json
+    ```
+
+    This template requires an install script. Add it using one of these methods:
+
+    - Download the script and place it at `s3://h2o-cloud/aws-template/install_sparkling_water_VERSION.sh`
+    - Modify the S3 path to the script directly in `TemplateEMR.json`
+
+    Click **Next**.
+  </Step>
+  <Step title="Specify stack details">
+    On the **Specify Details** page, enter a name for your stack and update any EMR-specific options as needed. Click **Next**.
+  </Step>
+  <Step title="Set options and create the stack">
+    Add any optional tags or permissions on the **Options** page, then click **Next**.
+
+    Review the full stack configuration and click **Create** to provision the EMR cluster.
+  </Step>
+  <Step title="Access Sparkling Water on the cluster">
+    After the EMR cluster is created, SSH into the head node. You will find an H2O folder containing Sparkling Water. Follow the instructions on the [H2O download page](https://www.h2o.ai/download/) to start H2O jobs.
+  </Step>
+</Steps>
+
+  </Tab>
+  <Tab title="Azure HDInsight">
+
+## Azure HDInsight
+
+The H2O Artificial Intelligence for Azure HDInsight application installs Sparkling Water directly onto an HDInsight Spark cluster. The cluster can access data from Azure Blob Storage and Azure Data Lake Store.
+
+<Warning>
+This feature is currently in **Beta** and should be used for testing purposes only.
+</Warning>
+
+**Requirements:** Python 3.6 or later.
+
+<Steps>
+  <Step title="Find H2O in the Azure portal">
+    In the [Azure portal](https://portal.azure.com), search for **H2O** and select **H2O Artificial Intelligence for HDInsight**. Click **Create**.
+  </Step>
+  <Step title="Configure cluster basics">
+    Under **Basics**:
+    - Change **Cluster Type** to the appropriate Spark version (Sparkling Water requires Spark 2.1 or later).
+    - Set the **Cluster Login** username and password (used to access the cluster web UI).
+    - Set the **SSH Username** and password (used to connect directly to the cluster VM).
+    - Create or specify a **Resource Group**.
+  </Step>
+  <Step title="Configure storage">
+    On the **Storage** tab, configure either an Azure Storage Account or an Azure Data Lake Store Gen2 Account. This is where your HDFS system will be located.
+
+    <Info>
+    See the Azure documentation for [Azure Storage](https://docs.microsoft.com/en-us/azure/hdinsight/hdinsight-hadoop-use-blob-storage) and [Azure Data Lake Storage Gen2](https://docs.microsoft.com/en-us/azure/hdinsight/hdinsight-hadoop-use-data-lake-storage-gen2).
+    </Info>
+  </Step>
+  <Step title="Accept H2O terms of use">
+    On the **H2O SparklingWater for HDInsight** tab, select and accept the Terms of Use for H2O.
+  </Step>
+  <Step title="Set cluster size and create">
+    On the **Summary** tab, configure the number of worker nodes. Choose only among the recommended worker node sizes if you need to change the machine profile.
+
+    Click **Create** to start cluster creation. This process can take up to 30 minutes. Monitor progress in the **Notifications** tab. If the deployment fails, delete the created resources and repeat the steps.
+  </Step>
+  <Step title="Connect to Jupyter Notebooks">
+    Once the cluster is ready, access your Jupyter notebooks at:
+
+    ```
+    https://<ClusterName>.azurehdinsight.net/jupyter
+    ```
+
+    Log in with your Cluster Login credentials. You will see three folders: **H2O-PySparkling-Examples**, **PySpark Examples**, and **Scala Examples**.
+
+    Open **H2O-PySparkling-Examples**. Each notebook begins by configuring the Spark environment, followed by starting the H2O cluster. After completing these steps, you are ready to build H2O models.
+  </Step>
+</Steps>
+
+**Access H2O Flow:**
+
+```
+https://<ClusterName>-h2o.apps.azurehdinsight.net:443
+```
+
+**Troubleshooting tips:**
+
+- If H2O Flow shows only the H2O documentation page after cluster creation, clear your browser cache and retry.
+- Do not allocate more than 75% of a worker's RAM to the Spark application — exceeding this limit can cause allocation failures.
+- To view available cluster resources, visit `http://<ClusterName>.azurehdinsight.net`.
+
+</Tab>
+  <Tab title="Azure Databricks">
+
+## Azure Databricks
+
+Sparkling Water runs on Azure Databricks clusters. The setup differs slightly between the Scala (Sparkling Water) and Python (PySparkling) variants.
+
+<Tabs>
+  <Tab title="Scala">
+
+<Steps>
+  <Step title="Log in to the Azure portal">
+    Log in to [portal.azure.com](https://portal.azure.com). Ensure you are using a user account created inside Azure Active Directory for the Databricks login.
+  </Step>
+  <Step title="Create a Databricks Azure environment">
+    Create your Azure Databricks workspace from the Azure portal if you have not done so already.
+  </Step>
+  <Step title="Add the Sparkling Water library">
+    In your Databricks workspace, go to **Libraries** and create a new library with the following settings:
+    - **Library Source**: Maven
+    - **Coordinates**: `ai.h2o:sparkling-water-package_SCALA_VERSION:SW_VERSION`
+
+    <Tip>
+    If you only need to score with existing H2O-3, Sparkling Water, or Driverless AI MOJO models and do not need to train new models, use the lighter scoring-only package instead:
+
+    `ai.h2o:sparkling-water-scoring-package_SCALA_VERSION:SW_VERSION`
+    </Tip>
+
+    You can attach the library to specific clusters manually or configure it to attach to all future clusters. Restart a running cluster after attaching a new library to ensure a clean environment.
+  </Step>
+  <Step title="Create the cluster">
+    Create a Databricks cluster with:
+    - The Sparkling Water assembly JAR attached
+    - The Spark version that matches your Sparkling Water release
+
+    It is recommended to use the latest available Sparkling Water and Spark versions for a given Spark major version.
+  </Step>
+  <Step title="Start H2OContext in a Scala notebook">
+    Create a Scala notebook and attach it to the cluster. Initialize `H2OContext` as:
+
+    ```scala
+    import ai.h2o.sparkling._
+    val hc = H2OContext.getOrCreate()
+    ```
+  </Step>
+  <Step title="Access H2O Flow">
+    The H2O Flow URL is printed after `H2OContext` starts. Sparkling Water uses port **9009** by default. To use a different open port on your Databricks cluster, configure it via:
+
+    ```scala
+    spark.conf.set("spark.ext.h2o.client.web.port", "YOUR_PORT")
+    ```
+
+    or via the corresponding setter on `H2OConf`.
+  </Step>
+</Steps>
+
+  </Tab>
+  <Tab title="Python">
+
+<Steps>
+  <Step title="Log in to the Azure portal">
+    Log in to [portal.azure.com](https://portal.azure.com). Ensure you are using a user account created inside Azure Active Directory for the Databricks login.
+  </Step>
+  <Step title="Create a Databricks Azure environment">
+    Create your Azure Databricks workspace from the Azure portal if you have not done so already.
+  </Step>
+  <Step title="Add the PySparkling library">
+    In your Databricks workspace, go to **Libraries** and create a new library with the following settings:
+    - **Library Source**: PyPI
+    - **Package**: `h2o_pysparkling_SPARK_MAJOR_VERSION`
+
+    This always installs the latest version and resolves dependencies automatically.
+
+    <Tip>
+    If you only need to score existing MOJO models without training new ones, use:
+
+    `h2o_pysparkling_scoring_SPARK_MAJOR_VERSION`
+    </Tip>
+
+    Restart the cluster after attaching the library to an already-running cluster.
+  </Step>
+  <Step title="Create the cluster">
+    Create a Databricks cluster with:
+    - The PySparkling library attached
+    - The Spark version that matches your Sparkling Water release
+  </Step>
+  <Step title="Start H2OContext in a Python notebook">
+    Create a Python notebook and attach it to the cluster. Initialize `H2OContext` as:
+
+    ```python
+    from pysparkling import *
+    hc = H2OContext.getOrCreate()
+    ```
+  </Step>
+  <Step title="Access H2O Flow">
+    The H2O Flow URL is printed after `H2OContext` starts. The default port is **9009**. To configure a different port:
+
+    ```python
+    conf = H2OConf()
+    conf.set("spark.ext.h2o.client.web.port", "YOUR_PORT")
+    hc = H2OContext.getOrCreate(conf)
+    ```
+  </Step>
+</Steps>
+
+  </Tab>
+</Tabs>
+
+  </Tab>
+  <Tab title="Google Cloud Dataproc">
+
+## Google Cloud Dataproc
+
+This section shows how to run a Sparkling Water job on Google Cloud Dataproc. The example uses Dataproc image version `2.0-debian10` (Spark 3.1, Scala 2.12).
+
+<Steps>
+  <Step title="Install the Google Cloud SDK and log in">
+    Install the [Google Cloud SDK](https://cloud.google.com/sdk/docs/install) and authenticate:
+
+    ```bash
+    gcloud auth login
+    ```
+  </Step>
+  <Step title="Download Sparkling Water">
+    Download the Sparkling Water distribution from the [H2O release page](http://h2o-release.s3.amazonaws.com/sparkling-water/spark-3.1/latest.html) and extract it.
+  </Step>
+  <Step title="Create the Dataproc cluster">
+    ```bash
+    DATAPROC_CLUSTER_NAME='sparkling-water-test'
+    GCP_REGION='europe-central2'
+
+    gcloud dataproc clusters create $DATAPROC_CLUSTER_NAME \
+      --region $GCP_REGION \
+      --image-version 2.0-debian10 \
+      --num-workers 3 \
+      --properties='^#^dataproc:pip.packages=tabulate==0.8.3,requests==2.21.0'
+    ```
+  </Step>
+  <Step title="Write and submit the Sparkling Water job">
+
+    <Tabs>
+      <Tab title="Scala">
+
+      Set variables and compile the job:
+
+      ```bash
+      SPARK_JARS=$(echo "$SPARK_HOME"/jars/*.jar | tr ' ' ':')
+      SPARKLING_WATER_JAR='sparkling-water-assembly_2.12-SW_VERSION-all.jar'
+      ```
+
+      Create a file named `SparklingWaterGcpExampleJob.scala`:
+
+      ```scala
+      import java.net.URI
+      import ai.h2o.sparkling._
+      import org.apache.spark.SparkFiles
+      import org.apache.spark.sql.SparkSession
+
+      object SparklingWaterGcpExampleJob extends App {
+        val spark = SparkSession.builder.appName("Sparkling water example").getOrCreate()
+        import spark.implicits._
+        val hc = H2OContext.getOrCreate()
+
+        val expectedClusterSize = 3
+        val clusterSize = hc.getH2ONodes().length
+        require(clusterSize != expectedClusterSize,
+          s"H2O cluster should be of size $expectedClusterSize but is $clusterSize")
+
+        spark.sparkContext.addFile(
+          "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/prostate/prostate.csv")
+        val frame = H2OFrame(new URI("file://" + SparkFiles.get("prostate.csv")))
+        val sparkDF = hc.asSparkFrame(frame).withColumn("CAPSULE", $"CAPSULE" cast "string")
+        val Array(trainingDF, testingDF) = sparkDF.randomSplit(Array(0.8, 0.2))
+
+        import ai.h2o.sparkling.ml.algos.H2OGBM
+        val estimator = new H2OGBM().setLabelCol("CAPSULE")
+        val model = estimator.fit(trainingDF)
+
+        model.transform(testingDF).collect()
+      }
+      ```
+
+      Compile and create the JAR:
+
+      ```bash
+      EXAMPLE_JOB_JAR='sparkling-water-gcp-example-job.jar'
+      scalac SparklingWaterGcpExampleJob.scala \
+        -d $EXAMPLE_JOB_JAR \
+        -classpath "$SPARKLING_WATER_JAR:$SPARK_JARS"
+      ```
+
+      Submit to the Dataproc cluster:
+
+      ```bash
+      gcloud dataproc jobs submit spark \
+        --class=SparklingWaterGcpExampleJob \
+        --cluster=$DATAPROC_CLUSTER_NAME \
+        --region=$GCP_REGION \
+        --jars "$SPARKLING_WATER_JAR,$EXAMPLE_JOB_JAR" \
+        --properties=spark.dynamicAllocation.enabled=false,spark.scheduler.minRegisteredResourcesRatio=1,spark.executor.instances=3
+      ```
+
+      </Tab>
+      <Tab title="Python">
+
+      Set variables:
+
+      ```bash
+      PYSPARKLING_ZIP='h2o_pysparkling_3.1-SW_VERSION.zip'
+      ```
+
+      Create a file named `sparkling_water_gcp_example_job.py`:
+
+      ```python
+      from pysparkling import *
+      from pyspark.sql import SparkSession
+      import h2o
+
+      spark = SparkSession.builder.appName("Sparkling water example").getOrCreate()
+      hc = H2OContext.getOrCreate()
+      assert h2o.cluster().cloud_size == 3
+
+      frame = h2o.import_file(
+          "https://raw.githubusercontent.com/h2oai/sparkling-water/master/examples/smalldata/prostate/prostate.csv")
+      sparkDF = hc.asSparkFrame(frame)
+      sparkDF = sparkDF.withColumn("CAPSULE", sparkDF.CAPSULE.cast("string"))
+      [trainingDF, testingDF] = sparkDF.randomSplit([0.8, 0.2])
+
+      from pysparkling.ml import H2OGBM
+      estimator = H2OGBM(labelCol="CAPSULE")
+      model = estimator.fit(trainingDF)
+
+      model.transform(testingDF).collect()
+      ```
+
+      Submit to the Dataproc cluster:
+
+      ```bash
+      gcloud dataproc jobs submit pyspark sparkling_water_gcp_example_job.py \
+        --cluster=$DATAPROC_CLUSTER_NAME \
+        --region=$GCP_REGION \
+        --py-files $PYSPARKLING_ZIP \
+        --properties=spark.dynamicAllocation.enabled=false,spark.scheduler.minRegisteredResourcesRatio=1,spark.executor.instances=3
+      ```
+
+      </Tab>
+    </Tabs>
+
+  </Step>
+</Steps>
+
+<Note>
+For production usage and automated cluster initialization, configure [Dataproc initialization actions](https://cloud.google.com/dataproc/docs/concepts/configuring-clusters/init-actions) to install Sparkling Water automatically on cluster creation.
+</Note>
+
+  </Tab>
+</Tabs>

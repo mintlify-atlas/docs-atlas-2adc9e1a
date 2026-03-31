@@ -1,0 +1,96 @@
+---
+title: 'Machine Learning overview'
+description: 'H2O algorithms exposed as Spark ML-compatible estimators, ready to use in Spark ML Pipelines.'
+keywords: ['sparkling water', 'machine learning', 'spark ml', 'h2o algorithms', 'pipeline']
+---
+
+Sparkling Water exposes every H2O algorithm as a Spark ML `Estimator`. Each estimator follows the standard Spark ML contract: you call `.fit(dataFrame)` to produce a `Transformer` (model), then `.transform(dataFrame)` to score. This means H2O models plug directly into `org.apache.spark.ml.Pipeline` stages alongside any other Spark ML component.
+
+## Spark ML Pipeline compatibility
+
+Because every H2O estimator and feature transformer implements the Spark ML `Estimator` / `Transformer` interfaces, you can:
+
+- Chain H2O feature transformers (e.g., `H2OTargetEncoder`, `H2OPCA`) with standard Spark transformers in a single `Pipeline`.
+- Save and load whole pipeline models including H2O MOJO models.
+- Use `H2OGridSearch` and `H2OAutoML` as drop-in replacements inside cross-validation wrappers.
+
+<Note>
+The label column type controls whether a supervised algorithm trains a classification or regression model. A string label triggers classification; a numeric label triggers regression. You can also use the explicit `*Classifier` / `*Regressor` variants (e.g., `H2OGBMClassifier`, `H2OXGBoostRegressor`) to pin the problem type regardless of column type.
+</Note>
+
+## Supervised algorithms
+
+<CardGroup cols={2}>
+  <Card title="H2OGBM" icon="chart-line" href="/ml/algorithms#h2ogbm">
+    Gradient Boosting Machine. Builds an ensemble of weak decision trees sequentially, each correcting the errors of its predecessor. Strong general-purpose algorithm for classification and regression.
+  </Card>
+  <Card title="H2ODRF" icon="tree" href="/ml/algorithms#h2odrf">
+    Distributed Random Forest. Trains a forest of independently grown trees in parallel. Robust to noise and overfitting, supports classification and regression.
+  </Card>
+  <Card title="H2OGLM" icon="function" href="/ml/algorithms#h2oglm">
+    Generalized Linear Model. Supports Gaussian, binomial, Poisson, and gamma distributions via configurable family and link functions.
+  </Card>
+  <Card title="H2OXGBoost" icon="bolt" href="/ml/algorithms#h2oxgboost">
+    XGBoost integrated into the H2O backend. Gradient boosted trees with regularization, missing value handling, and native support for sparse data.
+  </Card>
+  <Card title="H2ODeepLearning" icon="brain" href="/ml/algorithms#h2odeeplearning">
+    Multi-layer feed-forward neural network trained with SGD and back-propagation. Supports tanh, rectifier, and maxout activations.
+  </Card>
+  <Card title="H2OCoxPH" icon="heart-pulse" href="/ml/algorithms#h2ocoxph">
+    Cox Proportional Hazards model for survival analysis. Models time-to-event data with right-censored observations.
+  </Card>
+  <Card title="H2OGAM" icon="wave-sine" href="/ml/algorithms#h2ogam">
+    Generalized Additive Model. Extends GLM by modeling non-linear relationships through smooth spline functions. Experimental.
+  </Card>
+  <Card title="H2ORuleFit" icon="list-checks" href="/ml/algorithms#h2orulefit">
+    Combines tree ensembles and a sparse LASSO linear model. Produces a human-interpretable rule set alongside accurate predictions.
+  </Card>
+  <Card title="H2OStackedEnsemble" icon="layer-group" href="/ml/algorithms#h2ostackedensemble">
+    Finds an optimal combination of a collection of base models using a meta-learner. Works on cross-validated predictions or a blending frame.
+  </Card>
+</CardGroup>
+
+## Unsupervised algorithms
+
+<CardGroup cols={2}>
+  <Card title="H2OKMeans" icon="circle-nodes" href="/ml/algorithms#h2okmeans">
+    K-Means clustering. Groups observations into k clusters by iteratively minimising within-cluster distances.
+  </Card>
+  <Card title="H2OIsolationForest" icon="shield-halved" href="/ml/algorithms#h2oisolationforest">
+    Anomaly detection via isolation trees. Scores each row by how easily it can be isolated from the rest.
+  </Card>
+  <Card title="H2OExtendedIsolationForest" icon="shield-check" href="/ml/algorithms#h2oextendedisolationforest">
+    Generalisation of Isolation Forest that mitigates branching bias by adjusting the split direction at each node.
+  </Card>
+</CardGroup>
+
+## Feature engineering
+
+<CardGroup cols={2}>
+  <Card title="H2OTargetEncoder" icon="tags" href="/ml/feature-estimators#h2otargetencoder">
+    Converts high-cardinality categorical columns to continuous values based on the mean of the target column.
+  </Card>
+  <Card title="H2OPCA" icon="compress" href="/ml/feature-estimators#h2opca">
+    Principal Component Analysis. Reduces the number of features while preserving maximum variance.
+  </Card>
+  <Card title="H2OWord2Vec" icon="spell-check" href="/ml/feature-estimators#h2oword2vec">
+    Trains word embeddings from tokenised text columns and aggregates word vectors into a single feature vector per row.
+  </Card>
+  <Card title="H2OAutoEncoder" icon="arrows-to-circle" href="/ml/feature-estimators#h2oautoencoder">
+    Deep Learning autoencoder for feature encoding and anomaly detection via reconstruction error (MSE).
+  </Card>
+  <Card title="H2OGLRM" icon="table-cells" href="/ml/feature-estimators#h2oglrm">
+    Generalized Low Rank Models. Matrix factorisation approach to dimensionality reduction that handles mixed data types.
+  </Card>
+</CardGroup>
+
+## AutoML and grid search
+
+<CardGroup cols={2}>
+  <Card title="AutoML" icon="wand-magic-sparkles" href="/ml/automl">
+    Automated model selection and hyperparameter tuning. Trains and evaluates multiple algorithms and returns a ranked leaderboard.
+  </Card>
+  <Card title="Grid search" icon="sliders" href="/ml/grid-search">
+    Exhaustive (Cartesian) or random discrete search over a user-defined hyperparameter space for any supported algorithm.
+  </Card>
+</CardGroup>

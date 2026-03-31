@@ -1,0 +1,240 @@
+---
+title: "Supported Platforms"
+description: "Deployment environments, Spark version compatibility, supported languages, and package names for Sparkling Water."
+keywords: ["supported platforms", "YARN", "Kubernetes", "Databricks", "EMR", "HDInsight", "Dataproc", "Spark versions"]
+---
+
+Sparkling Water runs on top of Apache Spark and can be deployed across a wide range of environments — from a single developer laptop to large managed cloud clusters.
+
+## Deployment environments
+
+<CardGroup cols={2}>
+  <Card title="Local" icon="laptop">
+    Run Sparkling Water on a single machine using Spark's local mode. Set `MASTER` to `local`, `local[*]`, or any other local master URL. Suitable for development and testing.
+  </Card>
+  <Card title="Standalone Spark cluster" icon="server">
+    Deploy on a self-managed Spark cluster using Spark's built-in cluster manager. See the [Spark Standalone Mode](https://spark.apache.org/docs/latest/spark-standalone.html) documentation.
+  </Card>
+  <Card title="YARN (Hadoop)" icon="database">
+    Run on a CDH, HDP, or Apache Hadoop cluster managed by YARN. Supports both client and cluster deploy modes.
+  </Card>
+  <Card title="Kubernetes" icon="cube">
+    Run inside a Kubernetes cluster. Supported since Spark 2.4. Both internal and external H2O backend modes are available. Requires ports 54321 and 54322 to be accessible between pods.
+  </Card>
+  <Card title="AWS EMR" icon="cloud">
+    Use the H2O template in the AWS Marketplace to launch Sparkling Water on Amazon EMR. Requires `spark.dynamicAllocation.enabled=false` and `spark.scheduler.minRegisteredResourcesRatio=1`.
+  </Card>
+  <Card title="Azure HDInsight" icon="cloud">
+    Install the **H2O Artificial Intelligence for HDInsight** application during cluster creation in the Azure portal. Includes Jupyter Notebooks with pre-built H2O examples.
+  </Card>
+  <Card title="Databricks" icon="bolt">
+    Attach Sparkling Water as a Maven library (`ai.h2o:sparkling-water-package_<scala>:<sw-version>`) to a Databricks cluster. Supported on Azure Databricks; PySparkling and RSparkling are also available.
+  </Card>
+  <Card title="Google Cloud Dataproc" icon="cloud">
+    Run Sparkling Water on a Dataproc cluster. Dataproc image 2.0 (Spark 3.1, Scala 2.12) is a known-good starting point. Both Scala and Python jobs are supported via `gcloud dataproc jobs submit`.
+  </Card>
+</CardGroup>
+
+## Spark version compatibility
+
+Each Sparkling Water release targets a specific Spark major version. The release version encodes this directly:
+
+```
+<H2O version>-<patch>-<spark major version>
+```
+
+For example, version `3.26.0.9-2-2.4` integrates H2O `3.26.0.9`, is the second Sparkling Water patch for that H2O version, and targets Spark `2.4`.
+
+<Note>
+Always match the Sparkling Water package to the Spark major version running in your cluster. There are separate packages for Spark 2.x and Spark 3.x. Using a mismatched version will result in runtime errors.
+</Note>
+
+Install the correct package:
+
+<Tabs>
+  <Tab title="Scala (Maven)">
+    Add the dependency for your Spark major version:
+
+    ```xml pom.xml
+    <dependency>
+      <groupId>ai.h2o</groupId>
+      <artifactId>sparkling-water-package_2.12</artifactId>
+      <version>SPARKLING_WATER_VERSION</version>
+    </dependency>
+    ```
+
+    Or use `spark-submit` with the `--packages` flag:
+
+    ```bash
+    spark-submit \
+      --packages ai.h2o:sparkling-water-package_2.12:SPARKLING_WATER_VERSION \
+      --class ai.h2o.sparkling.MyApp \
+      my-app.jar
+    ```
+  </Tab>
+  <Tab title="Python (PySparkling)">
+    Install from PyPI. There is a separate package for each Spark major version:
+
+    ```bash
+    # For Spark 3.x
+    pip install h2o_pysparkling_3.3
+
+    # For Spark 2.x
+    pip install h2o_pysparkling_2.4
+    ```
+
+    PySparkling requires Python 3.6 or higher.
+  </Tab>
+  <Tab title="R (RSparkling)">
+    Install RSparkling and its dependencies from CRAN:
+
+    ```r
+    install.packages("sparklyr")
+    install.packages("rsparkling")
+    ```
+
+    RSparkling uses [sparklyr](https://spark.rstudio.com) as its Spark connection interface.
+  </Tab>
+</Tabs>
+
+## System requirements
+
+| Component | Requirement |
+|---|---|
+| Operating system | Linux, macOS, or Windows |
+| Java | Java 8 or higher |
+| Apache Spark | Match the Sparkling Water package's target Spark major version |
+| Python | Python 3.6+ (PySparkling only) |
+
+## Platform-specific notes
+
+<AccordionGroup>
+  <Accordion title="YARN (CDH / HDP / Apache Hadoop)">
+    Submit a Sparkling Water application to YARN using `spark-submit`. The following example targets a CDH or Apache Hadoop cluster:
+
+    ```bash
+    ./spark-submit \
+      --master=yarn \
+      --deploy-mode=client \
+      --class ai.h2o.sparkling.SparklingWaterDriver \
+      --driver-memory=8G \
+      --num-executors=3 \
+      --executor-memory=3G \
+      sparkling-water-assembly-SW_VERSION-all.jar
+    ```
+
+    For **HDP clusters**, add the `hdp.version` system property to both the executor classpath and the YARN AM options:
+
+    ```bash
+    ./spark-submit \
+      --master=yarn \
+      --deploy-mode=client \
+      --class ai.h2o.sparkling.SparklingWaterDriver \
+      --conf "spark.yarn.am.extraJavaOptions=-Dhdp.version=current" \
+      --driver-memory=8G \
+      --num-executors=3 \
+      --executor-memory=3G \
+      --conf "spark.executor.extraClassPath=-Dhdp.version=current" \
+      sparkling-water-assembly-SW_VERSION-all.jar
+    ```
+  </Accordion>
+  <Accordion title="Kubernetes">
+    Sparkling Water supports Kubernetes since Spark 2.4. Enable the default service account for Spark:
+
+    ```bash
+    kubectl create clusterrolebinding default \
+      --clusterrole=edit \
+      --serviceaccount=default:default \
+      --namespace=default
+    ```
+
+    Submit a job using the Sparkling Water Docker image:
+
+    ```bash
+    $SPARK_HOME/bin/spark-submit \
+      --master "k8s://KUBERNETES_ENDPOINT" \
+      --deploy-mode cluster \
+      --conf spark.scheduler.minRegisteredResourcesRatio=1 \
+      --conf spark.kubernetes.container.image=h2oai/sparkling-water-scala:SW_VERSION \
+      --conf spark.executor.instances=3 \
+      --class ai.h2o.sparkling.KubernetesTest \
+      local:///opt/sparkling-water/tests/kubernetes/KubernetesTest.jar
+    ```
+
+    <Warning>
+    Dynamic allocation must be disabled on Kubernetes. Ensure `spark.dynamicAllocation.enabled` is not set to `true`. Open ports 54321 and 54322 between pods for H2O inter-node communication.
+    </Warning>
+  </Accordion>
+  <Accordion title="AWS EMR">
+    Use the H2O template from the AWS Marketplace to create an EMR cluster with Sparkling Water pre-installed. All EMR jobs must include the following Spark configuration:
+
+    ```
+    --conf spark.dynamicAllocation.enabled=false
+    --conf spark.scheduler.minRegisteredResourcesRatio=1
+    ```
+
+    For EMR 5.32.0 and newer, also add:
+
+    ```
+    --conf spark.yarn.heterogeneousExecutors.enabled=false
+    ```
+  </Accordion>
+  <Accordion title="Azure HDInsight">
+    Install the **H2O Artificial Intelligence for HDInsight** application when creating a new HDInsight cluster in the Azure portal. The application installs Sparkling Water automatically and provides Jupyter Notebooks with pre-built examples.
+
+    The cluster can access data from Azure Blob Storage and Azure Data Lake Store Gen2, in addition to all standard H2O data sources.
+
+    <Note>
+    This feature is in Beta. Use it for testing purposes.
+    </Note>
+  </Accordion>
+  <Accordion title="Databricks">
+    Add Sparkling Water as a Maven library in the Databricks Libraries UI:
+
+    ```
+    ai.h2o:sparkling-water-package_2.12:SW_VERSION
+    ```
+
+    For scoring-only deployments (no model training), use the smaller scoring package:
+
+    ```
+    ai.h2o:sparkling-water-scoring-package_2.12:SW_VERSION
+    ```
+
+    Once the library is attached and the cluster is running, start `H2OContext` in a notebook:
+
+    ```scala
+    import ai.h2o.sparkling._
+    val hc = H2OContext.getOrCreate()
+    ```
+  </Accordion>
+  <Accordion title="Google Cloud Dataproc">
+    Create a Dataproc cluster with the required Python dependencies:
+
+    ```bash
+    gcloud dataproc clusters create sparkling-water-test \
+      --region europe-central2 \
+      --image-version 2.0-debian10 \
+      --num-workers 3 \
+      --properties='^#^dataproc:pip.packages=tabulate==0.8.3,requests==2.21.0'
+    ```
+
+    Submit a PySparkling job:
+
+    ```bash
+    gcloud dataproc jobs submit pyspark sparkling_water_job.py \
+      --cluster=sparkling-water-test \
+      --region=europe-central2 \
+      --jars=gs://path/to/sparkling-water-assembly_2.12-SW_VERSION-all.jar \
+      --properties=spark.scheduler.minRegisteredResourcesRatio=1
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Supported languages
+
+| Language | Package | Interface |
+|---|---|---|
+| Scala | `sparkling-water-package_<scala>` (Maven) | Native JVM API |
+| Python | `h2o_pysparkling_<spark>` (PyPI) | PySparkling + H2O Python REST API |
+| R | `rsparkling` (CRAN) | RSparkling via sparklyr |

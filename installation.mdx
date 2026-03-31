@@ -1,0 +1,341 @@
+---
+title: "Installation"
+description: "Install Sparkling Water via Maven, PyPI, Spark packages, or binary download. Choose the method that matches your language and deployment environment."
+---
+
+Sparkling Water is distributed as a Spark application library and supports several installation methods. Pick the approach that fits your stack.
+
+## System requirements
+
+Before installing, verify your environment meets these requirements:
+
+| Requirement | Version |
+|---|---|
+| Operating system | Linux, macOS, or Windows |
+| Java | 8 or later |
+| Apache Spark | 3.5 (see version matrix below) |
+| Python (PySparkling only) | 3.6 or later |
+
+<Note>
+  The `SPARK_HOME` environment variable must point to your local Spark installation for all deployment modes. Sparkling Water releases are tied to specific Spark major versions — make sure you install the matching package.
+</Note>
+
+### Spark version compatibility
+
+Each Sparkling Water release is built for a specific Spark major version. Supported versions as of the current release:
+
+| Spark version | Maven / PyPI suffix | Binary download |
+|---|---|---|
+| 3.5 | `_3.5` / `h2o_pysparkling_3.5` | [spark-3.5 latest](http://h2o-release.s3.amazonaws.com/sparkling-water/spark-3.5/latest.html) |
+| 3.4 | `_3.4` / `h2o_pysparkling_3.4` | [spark-3.4 latest](http://h2o-release.s3.amazonaws.com/sparkling-water/spark-3.4/latest.html) |
+| 3.3 | `_3.3` / `h2o_pysparkling_3.3` | [spark-3.3 latest](http://h2o-release.s3.amazonaws.com/sparkling-water/spark-3.3/latest.html) |
+| 3.2 | `_3.2` / `h2o_pysparkling_3.2` | [spark-3.2 latest](http://h2o-release.s3.amazonaws.com/sparkling-water/spark-3.2/latest.html) |
+| 3.1 | `_3.1` / `h2o_pysparkling_3.1` | [spark-3.1 latest](http://h2o-release.s3.amazonaws.com/sparkling-water/spark-3.1/latest.html) |
+| 3.0 | `_3.0` / `h2o_pysparkling_3.0` | [spark-3.0 latest](http://h2o-release.s3.amazonaws.com/sparkling-water/spark-3.0/latest.html) |
+
+## Installation methods
+
+<Tabs>
+  <Tab title="Maven / SBT (Scala)">
+    Add the Sparkling Water dependency to your Scala project. Replace `SW_VERSION` with the current release (e.g., `3.46.0.2-1-3.5`) and `{{scala_version}}` with your Scala base version (e.g., `2.12`). Check the [latest stable release](http://h2o-release.s3.amazonaws.com/sparkling-water/spark-3.5/latest.html) for the exact version string.
+
+    ### Maven
+
+    Add the dependency to your `pom.xml`:
+
+    ```xml pom.xml
+    <dependency>
+      <groupId>ai.h2o</groupId>
+      <artifactId>sparkling-water-package_2.12</artifactId>
+      <version>SW_VERSION</version>
+    </dependency>
+    ```
+
+    Ensure Maven Central is in your repositories:
+
+    ```xml pom.xml
+    <repositories>
+      <repository>
+        <id>central</id>
+        <url>https://repo1.maven.org/maven2</url>
+      </repository>
+    </repositories>
+    ```
+
+    ### SBT
+
+    ```scala build.sbt
+    libraryDependencies += "ai.h2o" %% "sparkling-water-package" % "SW_VERSION"
+    ```
+
+    ### Gradle
+
+    ```groovy build.gradle
+    repositories {
+      mavenCentral()
+    }
+
+    dependencies {
+      implementation "ai.h2o:sparkling-water-package_2.12:SW_VERSION"
+    }
+    ```
+
+    ### Available artifacts
+
+    | Artifact ID | Purpose |
+    |---|---|
+    | `sparkling-water-core_{{scala_version}}` | Core Sparkling Water library |
+    | `sparkling-water-package_{{scala_version}}` | Full package for training and scoring (recommended for `--packages`) |
+    | `sparkling-water-ml_{{scala_version}}` | Extends Spark ML with H2O-based transformations |
+    | `sparkling-water-scoring_{{scala_version}}` | Scoring logic and MOJO model definitions |
+    | `sparkling-water-scoring-package_{{scala_version}}` | Lightweight package for MOJO-only scoring |
+    | `sparkling-water-repl_{{scala_version}}` | Spark REPL integration for H2O Flow UI |
+    | `sparkling-water-examples_{{scala_version}}` | Example applications |
+
+    All artifacts are published under the `ai.h2o` group ID. Browse the full list on [Maven Central](http://search.maven.org/#search%7Cga%7C1%7Cg%3A%22ai.h2o%22%20AND%20a%3Asparkling-water*).
+
+    <Note>
+      A working example project using Sparkling Water as a Gradle/Maven dependency is available at the [h2o-droplets repository](https://github.com/h2oai/h2o-droplets/tree/master/sparkling-water-droplet).
+    </Note>
+  </Tab>
+
+  <Tab title="PyPI (Python)">
+    Install the PySparkling package that matches your Spark version using pip. The package name encodes the Spark major version:
+
+    <CodeGroup>
+
+    ```bash Spark 3.5
+    pip install h2o_pysparkling_3.5
+    ```
+
+    ```bash Spark 3.4
+    pip install h2o_pysparkling_3.4
+    ```
+
+    ```bash Spark 3.3
+    pip install h2o_pysparkling_3.3
+    ```
+
+    ```bash Spark 3.2
+    pip install h2o_pysparkling_3.2
+    ```
+
+    ```bash Spark 3.1
+    pip install h2o_pysparkling_3.1
+    ```
+
+    ```bash Spark 3.0
+    pip install h2o_pysparkling_3.0
+    ```
+
+    </CodeGroup>
+
+    PySparkling automatically installs its dependencies (`requests`, `tabulate`, and others). After installation, verify it works:
+
+    ```python
+    from pysparkling import H2OContext, H2OConf
+    hc = H2OContext.getOrCreate()
+    ```
+
+    <Warning>
+      Your Python environment must have a functional PySpark installation with all Spark dependencies. PySparkling does not install Spark itself. Set `SPARK_HOME` before launching your Python script or notebook.
+    </Warning>
+
+    ### Using in Databricks
+
+    In Databricks, add PySparkling as a cluster library:
+
+    1. Open your cluster settings and go to **Libraries**.
+    2. Click **Install New** and choose **PyPI**.
+    3. Enter `h2o_pysparkling_3.5` (or the version matching your Databricks runtime).
+    4. Click **Install** and restart the cluster.
+  </Tab>
+
+  <Tab title="Spark packages (--packages)">
+    Use Sparkling Water directly as a Spark package without pre-installing anything. This method downloads the artifact from Maven Central at runtime.
+
+    ### spark-shell (Scala)
+
+    ```bash
+    $SPARK_HOME/bin/spark-shell \
+      --packages ai.h2o:sparkling-water-package_2.12:SW_VERSION
+    ```
+
+    ### spark-submit (Scala application)
+
+    ```bash
+    $SPARK_HOME/bin/spark-submit \
+      --packages ai.h2o:sparkling-water-package_2.12:SW_VERSION \
+      --class com.example.MySparkApp \
+      my-app.jar
+    ```
+
+    ### pyspark (Python)
+
+    ```bash
+    $SPARK_HOME/bin/pyspark \
+      --packages ai.h2o:sparkling-water-package_2.12:SW_VERSION
+    ```
+
+    Once the shell starts, initialize H2OContext as usual:
+
+    <CodeGroup>
+
+    ```scala Scala
+    import ai.h2o.sparkling._
+    val hc = H2OContext.getOrCreate()
+    import hc._
+    ```
+
+    ```python Python
+    from pysparkling import H2OContext
+    hc = H2OContext.getOrCreate()
+    ```
+
+    </CodeGroup>
+
+    <Note>
+      When using `--packages`, Spark resolves the artifact from Maven Central on first run and caches it locally. Ensure the machine running the driver has internet access or configure a local Maven mirror.
+    </Note>
+  </Tab>
+
+  <Tab title="Binary download">
+    Download the pre-built Sparkling Water distribution as a zip archive. This bundles the library with shell scripts (`sparkling-shell`, `pysparkling`) for interactive use.
+
+    ### Download
+
+    Download the zip for your Spark version from the release page:
+
+    ```bash
+    # For Spark 3.5 — replace VERSION with the actual release number
+    wget http://h2o-release.s3.amazonaws.com/sparkling-water/spark-3.5/latest.html
+    ```
+
+    Visit the [download index](http://h2o-release.s3.amazonaws.com/sparkling-water/spark-3.5/latest.html) to get the direct zip URL for the latest stable release.
+
+    ### Local setup
+
+    ```bash
+    # 1. Set Spark environment
+    export SPARK_HOME="/path/to/spark/installation"
+    export MASTER="local[*]"
+
+    # 2. Unpack the distribution
+    cd ~/Downloads
+    unzip sparkling-water-SW_VERSION.zip
+    cd sparkling-water-SW_VERSION
+
+    # 3. Launch the Sparkling shell
+    bin/sparkling-shell
+    ```
+
+    ### YARN cluster
+
+    ```bash
+    export SPARK_HOME='/path/to/spark/installation'
+    export HADOOP_CONF_DIR=/etc/hadoop/conf
+    export MASTER="yarn"
+
+    bin/sparkling-shell \
+      --num-executors 3 \
+      --executor-memory 2g \
+      --master yarn \
+      --deploy-mode client
+    ```
+
+    ### Standalone Spark cluster
+
+    ```bash
+    export SPARK_HOME='/path/to/spark/installation'
+    export MASTER="spark://localhost:7077"
+
+    # Launch the standalone cluster (included script)
+    bin/launch-spark-cloud.sh
+
+    # Then start the Sparkling shell against it
+    bin/sparkling-shell
+    ```
+
+    ### Python interactive shell
+
+    The binary distribution also includes a `pysparkling` shell script:
+
+    ```bash
+    bin/pysparkling
+    ```
+
+    To launch a Jupyter notebook:
+
+    ```bash
+    PYSPARK_DRIVER_PYTHON="jupyter" \
+    PYSPARK_DRIVER_PYTHON_OPTS="notebook" \
+    bin/pysparkling
+    ```
+  </Tab>
+</Tabs>
+
+## R (RSparkling)
+
+RSparkling is installed from H2O's hosted R repository. First install sparklyr, then Sparkling Water, then RSparkling:
+
+```r
+# 1. Install sparklyr and Spark
+install.packages("sparklyr")
+library(sparklyr)
+spark_install(version = "3.5")
+
+# 2. Install the h2o R package
+install.packages("h2o", type = "source",
+  repos = "http://h2o-release.s3.amazonaws.com/h2o/rel-3.46.0/6/R")
+
+# 3. Install RSparkling
+install.packages("rsparkling", type = "source",
+  repos = "http://h2o-release.s3.amazonaws.com/sparkling-water/spark-3.5/SW_VERSION/R")
+```
+
+After installation, load the package and connect:
+
+```r
+library(rsparkling)
+sc <- spark_connect(master = "local", version = "3.5")
+hc <- H2OContext.getOrCreate()
+```
+
+<Note>
+  `library(rsparkling)` must be called before `spark_connect()` so the Sparkling Water extension is registered with sparklyr.
+</Note>
+
+## Verifying your installation
+
+After installing, run this minimal check to confirm H2O starts correctly inside Spark:
+
+<CodeGroup>
+
+```scala Scala
+import ai.h2o.sparkling._
+
+val hc = H2OContext.getOrCreate()
+println(s"H2O cluster is running: ${hc.flowURL()}")
+```
+
+```python Python
+from pysparkling import H2OContext
+
+hc = H2OContext.getOrCreate()
+print(f"H2O cluster is running: {hc.flowURL()}")
+```
+
+</CodeGroup>
+
+If successful, you'll see a URL for the H2O Flow UI printed to the console.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Train your first H2O model inside Spark.
+  </Card>
+  <Card title="Backends" icon="server" href="/deployment/backends">
+    Configure internal vs. external H2O cluster modes.
+  </Card>
+</CardGroup>

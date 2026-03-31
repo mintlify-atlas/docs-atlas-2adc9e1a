@@ -1,0 +1,578 @@
+---
+title: "Machine Learning with PySparkling"
+description: "Train H2O algorithms (GBM, GLM, XGBoost, AutoML, Deep Learning) from Python, compose Spark ML Pipelines, and score with MOJO models."
+keywords: ["pysparkling", "h2o", "gbm", "glm", "xgboost", "automl", "deep learning", "mojo", "spark pipeline", "machine learning"]
+---
+
+PySparkling exposes H2O algorithms as Spark ML-compatible estimators. You import them from `pysparkling.ml`, configure them with typed setters, call `fit()` on a Spark DataFrame, and get back a model that implements the standard Spark `Transformer` interface. The resulting model wraps an H2O MOJO internally, which means it can be saved, loaded, and scored without a running H2O cluster.
+
+## Algorithm imports
+
+All algorithms live under `pysparkling.ml`:
+
+```python
+from pysparkling.ml import (
+    H2OGBM,
+    H2OGLM,
+    H2OXGBoost,
+    H2ODeepLearning,
+    H2OAutoML,
+    H2ODRF,
+    H2OGAM,
+    H2OKMeans,
+    H2OIsolationForest,
+    H2OStackedEnsemble,
+)
+```
+
+Specialized classifier and regressor variants (e.g. `H2OGBMClassifier`, `H2OGBMRegressor`) are also available for pipelines where you want an explicit task type on the estimator:
+
+```python
+from pysparkling.ml import (
+    H2OGBMClassifier,
+    H2OGBMRegressor,
+    H2OXGBoostClassifier,
+    H2OXGBoostRegressor,
+    H2OAutoMLClassifier,
+    H2OAutoMLRegressor,
+)
+```
+
+## General training pattern
+
+Every H2O estimator in PySparkling follows the same Spark ML pattern:
+
+```python
+from pyspark.sql import SparkSession
+from pysparkling import H2OContext
+from pysparkling.ml import H2OGBM
+
+spark = SparkSession.builder.appName("MLApp").getOrCreate()
+hc = H2OContext.getOrCreate()
+
+# Load data as a Spark DataFrame
+df = spark.read.csv("data/train.csv", header=True, inferSchema=True)
+
+# Configure the estimator
+estimator = H2OGBM(
+    featuresCols=["feature1", "feature2", "feature3"],
+    labelCol="label",
+    splitRatio=0.8,
+    seed=42,
+)
+
+# Train — returns an H2OMOJOModel
+model = estimator.fit(df)
+
+# Score — returns a new DataFrame with a "prediction" column
+predictions = model.transform(df)
+predictions.select("label", "prediction").show(10)
+```
+
+## Algorithms
+
+<AccordionGroup>
+  <Accordion title="GBM — Gradient Boosting Machine">
+    `H2OGBM` trains a gradient boosted tree ensemble. It handles both classification and regression and accepts a wide set of tree tuning parameters.
+
+    <CodeGroup>
+
+    ```python train_gbm.py
+    from pysparkling.ml import H2OGBM
+
+    gbm = H2OGBM(
+        featuresCols=["col1", "col2", "col3"],
+        labelCol="label",
+        ntrees=100,
+        maxDepth=5,
+        learnRate=0.05,
+        minRows=10,
+        splitRatio=0.8,
+        seed=1,
+    )
+
+    model = gbm.fit(train_df)
+    predictions = model.transform(test_df)
+    ```
+
+    ```python gbm_pipeline.py
+    from pyspark.ml import Pipeline
+    from pyspark.ml.feature import VectorAssembler
+    from pysparkling.ml import H2OGBM
+
+    gbm = H2OGBM(
+        featuresCols=["sepal_length", "sepal_width", "petal_length"],
+        labelCol="species",
+        ntrees=50,
+        splitRatio=0.8,
+        seed=1,
+    )
+
+    pipeline = Pipeline(stages=[gbm])
+    model = pipeline.fit(df)
+    model.transform(df).select("species", "prediction").show()
+    ```
+
+    </CodeGroup>
+
+    Key parameters:
+
+    | Parameter | Default | Description |
+    |---|---|---|
+    | `ntrees` | 50 | Number of trees to build |
+    | `maxDepth` | 5 | Maximum tree depth |
+    | `learnRate` | 0.1 | Learning rate (shrinkage) |
+    | `minRows` | 10 | Minimum observations per leaf |
+    | `splitRatio` | 1.0 | Fraction of rows used for training; remainder becomes validation |
+    | `seed` | -1 | Random seed for reproducibility |
+  </Accordion>
+
+  <Accordion title="GLM — Generalized Linear Model">
+    `H2OGLM` fits regularized generalized linear models. It supports a variety of family/link combinations including Gaussian (linear regression), Binomial (logistic regression), Poisson, Gamma, and Tweedie.
+
+    <CodeGroup>
+
+    ```python logistic_regression.py
+    from pysparkling.ml import H2OGLM
+
+    glm = H2OGLM(
+        featuresCols=["age", "income", "education"],
+        labelCol="purchased",
+        family="binomial",
+        alpha=[0.5],
+        lambda_=[0.0001],
+        splitRatio=0.8,
+        seed=42,
+    )
+
+    model = glm.fit(df)
+    predictions = model.transform(df)
+    ```
+
+    ```python linear_regression.py
+    from pysparkling.ml import H2OGLM
+
+    glm = H2OGLM(
+        featuresCols=["sqft", "bedrooms", "bathrooms"],
+        labelCol="price",
+        family="gaussian",
+        alpha=[0.0],   # Ridge regression
+        splitRatio=0.8,
+    )
+
+    model = glm.fit(df)
+    predictions = model.transform(df)
+    ```
+
+    </CodeGroup>
+
+    Key parameters:
+
+    | Parameter | Description |
+    |---|---|
+    | `family` | Distribution family: `gaussian`, `binomial`, `poisson`, `gamma`, `tweedie` |
+    | `alpha` | Elastic net mixing parameter (0 = Ridge, 1 = Lasso) |
+    | `lambda_` | Regularization strength |
+    | `standardize` | Whether to standardize features before training |
+  </Accordion>
+
+  <Accordion title="XGBoost">
+    `H2OXGBoost` wraps the XGBoost library inside H2O and provides the same Spark ML estimator interface. XGBoost is well suited for tabular data with many numeric features.
+
+    <CodeGroup>
+
+    ```python xgboost_classifier.py
+    from pysparkling.ml import H2OXGBoost
+
+    xgboost = H2OXGBoost(
+        featuresCols=["f1", "f2", "f3", "f4"],
+        labelCol="target",
+        ntrees=200,
+        maxDepth=6,
+        learnRate=0.05,
+        convertUnknownCategoricalLevelsToNa=True,
+        splitRatio=0.8,
+        seed=1,
+    )
+
+    model = xgboost.fit(df)
+    predictions = model.transform(df)
+    predictions.select("target", "prediction").show()
+    ```
+
+    ```python xgboost_typed.py
+    from pysparkling.ml import H2OXGBoostClassifier
+
+    clf = H2OXGBoostClassifier(
+        featuresCols=["f1", "f2", "f3"],
+        labelCol="label",
+        ntrees=100,
+        seed=42,
+    )
+
+    model = clf.fit(df)
+    ```
+
+    </CodeGroup>
+
+    <Warning>
+      XGBoost requires the `xgboost4j` native library on each Spark executor. Ensure your cluster has the correct native binary for its OS and architecture. On Databricks, the managed runtime includes XGBoost by default.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="AutoML">
+    `H2OAutoML` automatically trains and tunes multiple algorithms, then stacks them into an ensemble. It is the easiest way to get a high-quality model when you do not want to tune hyperparameters manually.
+
+    <CodeGroup>
+
+    ```python automl_basic.py
+    from pysparkling.ml import H2OAutoML
+
+    automl = H2OAutoML(
+        featuresCols=["col1", "col2", "col3"],
+        labelCol="target",
+        maxRuntimeSecs=300,    # 5 minutes total budget
+        maxModels=20,
+        convertUnknownCategoricalLevelsToNa=True,
+        seed=1,
+    )
+
+    model = automl.fit(df)
+    predictions = model.transform(df)
+    ```
+
+    ```python automl_classifier.py
+    from pysparkling.ml import H2OAutoMLClassifier
+
+    clf = H2OAutoMLClassifier(
+        featuresCols=["age", "income", "score"],
+        labelCol="churn",
+        maxRuntimeSecs=600,
+        maxModels=30,
+        seed=42,
+    )
+
+    model = clf.fit(df)
+    predictions = model.transform(df)
+    ```
+
+    </CodeGroup>
+
+    Key parameters:
+
+    | Parameter | Default | Description |
+    |---|---|---|
+    | `maxRuntimeSecs` | 0 (unlimited) | Wall-clock training budget in seconds |
+    | `maxModels` | 0 (unlimited) | Maximum number of individual models to train |
+    | `seed` | -1 | Random seed |
+    | `convertUnknownCategoricalLevelsToNa` | `False` | Map unseen categories to NA at scoring time |
+
+    <Tip>
+      Set both `maxRuntimeSecs` and `maxModels` to ensure AutoML terminates in a predictable amount of time. AutoML stops as soon as either limit is reached.
+    </Tip>
+  </Accordion>
+
+  <Accordion title="Deep Learning">
+    `H2ODeepLearning` trains a multi-layer feed-forward neural network. Use it for structured tabular data or as a baseline for comparison with tree methods.
+
+    <CodeGroup>
+
+    ```python deep_learning.py
+    from pysparkling.ml import H2ODeepLearning
+
+    dl = H2ODeepLearning(
+        featuresCols=["f1", "f2", "f3"],
+        labelCol="label",
+        epochs=10,
+        hidden=[200, 200],
+        activation="Rectifier",
+        l1=0.001,
+        l2=0.0,
+        seed=1,
+    )
+
+    model = dl.fit(df)
+    predictions = model.transform(df)
+    ```
+
+    ```python dl_spam_example.py
+    # Adapted from HamOrSpamMultiAlgorithmDemo.py
+    from pysparkling.ml import H2ODeepLearning
+
+    dl = H2ODeepLearning(
+        epochs=10,
+        seed=1,
+        l1=0.001,
+        l2=0.0,
+        hidden=[200, 200],
+        featuresCols=["tf_idf"],
+        labelCol="label",
+    )
+
+    model = dl.fit(training_df)
+    predictions = model.transform(test_df)
+    ```
+
+    </CodeGroup>
+  </Accordion>
+
+  <Accordion title="DRF — Distributed Random Forest">
+    `H2ODRF` builds a random forest using distributed computing. It is a strong baseline for both classification and regression tasks.
+
+    ```python
+    from pysparkling.ml import H2ODRF
+
+    drf = H2ODRF(
+        featuresCols=["feature1", "feature2", "feature3"],
+        labelCol="label",
+        ntrees=100,
+        maxDepth=20,
+        mtries=-1,       # Use sqrt(features) by default
+        splitRatio=0.8,
+        seed=42,
+    )
+
+    model = drf.fit(df)
+    predictions = model.transform(df)
+    ```
+  </Accordion>
+
+  <Accordion title="K-Means (unsupervised)">
+    `H2OKMeans` performs unsupervised clustering. No label column is required.
+
+    ```python
+    from pysparkling.ml import H2OKMeans
+
+    kmeans = H2OKMeans(
+        featuresCols=["x", "y", "z"],
+        k=5,
+        maxIterations=100,
+        seed=42,
+    )
+
+    model = kmeans.fit(df)
+
+    # transform() adds a "prediction" column with the cluster assignment (0-indexed)
+    clustered = model.transform(df)
+    clustered.select("x", "y", "prediction").show()
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Spark ML Pipelines
+
+H2O estimators are first-class Spark ML pipeline stages. You can combine them with any standard Spark transformer:
+
+```python
+import os
+from pyspark.ml import Pipeline, PipelineModel
+from pyspark.ml.feature import HashingTF, RegexTokenizer, StopWordsRemover, IDF
+from pysparkling.ml import ColumnPruner, H2OGBM
+
+# Tokenize text
+tokenizer = RegexTokenizer(
+    inputCol="text", outputCol="words",
+    minTokenLength=3, gaps=False, pattern="[a-zA-Z]+"
+)
+
+# Remove stop words
+stopWordsRemover = StopWordsRemover(
+    inputCol=tokenizer.getOutputCol(), outputCol="filtered",
+    stopWords=["the", "a", "", "in", "on", "at", "as", "not", "for"],
+    caseSensitive=False
+)
+
+# Hash to feature vector
+hashingTF = HashingTF(
+    inputCol=stopWordsRemover.getOutputCol(),
+    outputCol="wordToIndex", numFeatures=1024
+)
+
+# TF-IDF weighting
+idf = IDF(
+    inputCol=hashingTF.getOutputCol(),
+    outputCol="tf_idf", minDocFreq=4
+)
+
+# Drop intermediate columns before the H2O stage
+colPruner = ColumnPruner(columns=[
+    hashingTF.getOutputCol(),
+    stopWordsRemover.getOutputCol(),
+    tokenizer.getOutputCol(),
+])
+
+# H2O GBM as the final stage
+gbm = H2OGBM(
+    splitRatio=0.8, seed=1,
+    featuresCols=[idf.getOutputCol()],
+    labelCol="label"
+)
+
+# Prune the IDF column after GBM
+idfColPruner = ColumnPruner(columns=[idf.getOutputCol()])
+
+pipeline = Pipeline(stages=[
+    tokenizer, stopWordsRemover, hashingTF,
+    idf, colPruner, gbm, idfColPruner
+])
+
+# Fit the full pipeline
+model = pipeline.fit(training_df)
+
+# Score with the fitted pipeline
+predictions = model.transform(test_df)
+```
+
+## Saving and loading models
+
+Trained PySparkling models are persisted using the standard Spark ML save/load API. They can be saved to the local filesystem, HDFS, or S3.
+
+```python
+# Save a fitted pipeline model
+model.write().overwrite().save("file:///path/to/saved_model")
+
+# Load and score without re-training
+from pyspark.ml import PipelineModel
+
+loaded_model = PipelineModel.load("file:///path/to/saved_model")
+predictions = loaded_model.transform(new_df)
+```
+
+<Note>
+  When loading a model in a new Spark session for scoring, you must initialize PySparkling first so that Spark can find the required classes. You do **not** need to start `H2OContext`:
+
+  ```python
+  from pysparkling.initializer import Initializer
+  Initializer.load_sparkling_jar(spark)
+
+  from pyspark.ml import PipelineModel
+  model = PipelineModel.load("path/to/saved_model")
+  predictions = model.transform(df)
+  ```
+</Note>
+
+## MOJO model scoring
+
+H2O's Model Object, Optimized (MOJO) format is a portable, self-contained model artifact. You can import any MOJO produced by H2O-3 into PySparkling for scoring without needing an H2O cluster.
+
+### Load a MOJO from a file
+
+```python
+from pysparkling.ml import H2OMOJOModel
+
+# Local file
+model = H2OMOJOModel.createFromMojo("prostate_mojo.zip")
+
+# Absolute local path
+model = H2OMOJOModel.createFromMojo("/Users/alice/models/prostate_mojo.zip")
+
+# HDFS path
+model = H2OMOJOModel.createFromMojo("hdfs:///user/alice/prostate_mojo.zip")
+
+# Explicit scheme
+model = H2OMOJOModel.createFromMojo("file:///Users/alice/models/prostate_mojo.zip")
+```
+
+### Score with a MOJO model
+
+```python
+predictions = model.transform(spark_df)
+
+# The "prediction" column contains predicted labels (classification)
+# or predicted values (regression).
+predictions.select("prediction").show(5)
+
+# "detailed_prediction" contains additional details such as per-class
+# probabilities, Shapley values, and leaf node assignments.
+predictions.select("detailed_prediction").show(5)
+```
+
+### Configure MOJO settings
+
+Use `H2OMOJOSettings` to control the output format before loading:
+
+```python
+from pysparkling.ml import H2OMOJOModel, H2OMOJOSettings
+
+settings = H2OMOJOSettings(
+    convertUnknownCategoricalLevelsToNa=True,
+    convertInvalidNumbersToNa=True,
+    withContributions=True,          # Include Shapley values
+    predictionCol="prediction",
+    detailedPredictionCol="detailed_prediction",
+)
+
+model = H2OMOJOModel.createFromMojo("my_model.zip", settings)
+```
+
+Available settings:
+
+| Setting | Default | Description |
+|---|---|---|
+| `predictionCol` | `prediction` | Name of the output prediction column |
+| `detailedPredictionCol` | `detailed_prediction` | Name of the detailed output column |
+| `convertUnknownCategoricalLevelsToNa` | `False` | Map unseen categories to NA |
+| `convertInvalidNumbersToNa` | `False` | Map invalid numeric values to NA |
+| `withContributions` | `False` | Add Shapley values to detailed prediction (tree models only) |
+| `withLeafNodeAssignments` | `False` | Add leaf node assignments to detailed prediction |
+| `withStageResults` | `False` | Add per-tree stage results to detailed prediction |
+
+### Export and re-import a trained model
+
+After training a model through the Sparkling Water API, you can export and re-import it as a MOJO using `write/read`:
+
+```python
+# Export
+model.write().save("/path/to/mojo_model")
+
+# Re-import in another session
+from pysparkling.ml import H2OMOJOModel
+
+model = H2OMOJOModel.read().load("/path/to/mojo_model")
+predictions = model.transform(df)
+```
+
+### Specific MOJO model types
+
+`H2OMOJOModel.createFromMojo()` returns the base `H2OMOJOModel`. Algorithm-specific MOJO classes expose additional getters:
+
+```python
+from pysparkling.ml import H2OGBMMOJOModel
+
+gbm_mojo = H2OGBMMOJOModel.createFromMojo("gbm_model.zip")
+
+# Algorithm-specific information
+print(gbm_mojo.getDomainValues())
+print(gbm_mojo.getModelCategory())      # e.g. "binomial", "regression"
+print(gbm_mojo.getFeatureTypes())       # column name → type mapping
+print(gbm_mojo.getFeatureImportances()) # variable importance DataFrame
+print(gbm_mojo.getTrainingMetrics())    # dict of metric name → value
+```
+
+Available specific MOJO types: `H2OGBMMOJOModel`, `H2ODRFMOJOModel`, `H2OXGBoostMOJOModel`, `H2OGLMMOJOModel`, `H2OGAMMOJOModel`, `H2ODeepLearningMOJOModel`, `H2OKMeansMOJOModel`, `H2OIsolationForestMOJOModel`, `H2OCoxPHMOJOModel`, `H2OAutoEncoderMOJOModel`.
+
+## Feature engineering utilities
+
+`pysparkling.ml` also provides feature transformers that integrate with Spark ML Pipelines:
+
+| Class | Description |
+|---|---|
+| `H2OTargetEncoder` | Target encoding for high-cardinality categoricals |
+| `ColumnPruner` | Drops specified columns from a DataFrame within a pipeline |
+| `H2OWord2Vec` | Trains word embeddings on a token column |
+| `H2OAutoEncoder` | Unsupervised feature extraction via autoencoder |
+| `H2OPCA` | Principal component analysis for dimensionality reduction |
+| `H2OGLRM` | Generalized Low-Rank Models for matrix factorization |
+
+```python
+from pysparkling.ml import H2OTargetEncoder
+
+encoder = H2OTargetEncoder(
+    inputCols=["city", "category"],
+    outputCols=["city_encoded", "category_encoded"],
+    labelCol="target",
+    holdoutStrategy="LeaveOneOut",
+)
+
+encoded_df = encoder.fit(df).transform(df)
+```

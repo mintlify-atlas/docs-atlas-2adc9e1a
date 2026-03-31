@@ -1,0 +1,487 @@
+---
+title: "Security"
+description: "Configure SSL/TLS, LDAP, Kerberos, and secured H2O Flow UI for Sparkling Water deployments."
+keywords: ["sparkling water security", "ssl", "tls", "ldap", "kerberos", "secured flow", "h2o authentication"]
+---
+
+Sparkling Water supports several security mechanisms for protecting H2O node communication, the Flow UI, and user authentication. Each mechanism is configured independently via `H2OConf` properties.
+
+<Tabs>
+  <Tab title="SSL/TLS">
+
+## SSL/TLS for H2O node communication
+
+SSL secures data exchange among H2O nodes and between Spark instances (driver and executors) and the H2O cluster. The security settings for inter-node communication also apply to the H2O Flow UI.
+
+### Automatic certificate generation
+
+Sparkling Water can generate a keystore and truststore automatically and distribute them to all workers via YARN or Spark file distribution:
+
+<CodeGroup>
+
+```bash spark-submit
+bin/sparkling-shell \
+  --conf "spark.ext.h2o.internal_secure_connections=true"
+```
+
+```scala Scala
+import ai.h2o.sparkling._
+
+val conf = new H2OConf().setInternalSecureConnectionsEnabled()
+val hc = H2OContext.getOrCreate(conf)
+```
+
+```python Python
+from pysparkling import *
+
+conf = H2OConf().setInternalSecureConnectionsEnabled()
+hc = H2OContext.getOrCreate(conf)
+```
+
+</CodeGroup>
+
+<Note>
+Automatic generation creates self-signed certificates. The distribution mechanism relies on YARN or Spark security to protect the files in transit. Use this mode only when YARN/Spark-level security is already configured.
+</Note>
+
+### Manual SSL configuration file
+
+If you have existing security infrastructure, point Sparkling Water to a pre-built H2O SSL properties file:
+
+<CodeGroup>
+
+```bash spark-submit
+bin/sparkling-shell \
+  --conf "spark.ext.h2o.internal_security_conf=ssl.properties"
+```
+
+```scala Scala
+import ai.h2o.sparkling._
+
+val conf = new H2OConf().setSslConf("/path/to/ssl.properties")
+val hc = H2OContext.getOrCreate(conf)
+```
+
+```python Python
+from pysparkling import *
+
+conf = H2OConf().setSslConf("/path/to/ssl.properties")
+hc = H2OContext.getOrCreate(conf)
+```
+
+</CodeGroup>
+
+The format of the SSL properties file follows the H2O-3 inter-node security specification.
+
+### Configuration properties
+
+<ParamField path="spark.ext.h2o.internal_secure_connections" type="boolean" default="false">
+  Enables automatic keystore/truststore generation and secures all H2O inter-node and Spark-H2O communication.
+
+  **H2OConf setters:** `setInternalSecureConnectionsEnabled()`, `setInternalSecureConnectionsDisabled()`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.internal_security_conf" type="string">
+  Path to a file containing H2O or Sparkling Water internal security configuration when using manually created certificates.
+
+  **H2OConf setter:** `setSslConf(String)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.allow_insecure_xgboost" type="boolean" default="false">
+  When `true`, allows XGBoost to use insecure inter-node communication even when other security options are enabled.
+
+  **H2OConf setters:** `setInsecureXGBoostAllowed()`, `setInsecureXGBoostDenied()`
+</ParamField>
+
+  </Tab>
+  <Tab title="Secured Flow UI (HTTPS)">
+
+## Securing H2O Flow UI with HTTPS
+
+The Flow UI and internal REST connections between Spark executors and H2O nodes share the same SSL configuration.
+
+### Using an existing Java keystore
+
+Provide a Java keystore file containing your SSL certificate:
+
+<ParamField path="spark.ext.h2o.jks" type="string">
+  Path to the Java keystore (JKS) file. The certificate in the keystore must cover all hostnames where H2O nodes run, or you must disable hostname verification.
+
+  **H2OConf setter:** `setJks(String)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.jks.pass" type="string">
+  Password for the Java keystore file.
+
+  **H2OConf setter:** `setJksPass(String)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.jks.alias" type="string">
+  Alias of the certificate within the keystore. Required only when the keystore contains multiple certificates.
+
+  **H2OConf setter:** `setJksAlias(String)`
+</ParamField>
+
+<CodeGroup>
+
+```bash spark-submit
+bin/sparkling-shell \
+  --conf "spark.ext.h2o.jks=/path/to/keystore" \
+  --conf "spark.ext.h2o.jks.pass=changeit"
+```
+
+```scala Scala
+import ai.h2o.sparkling._
+
+val conf = new H2OConf()
+  .setJks("/path/to/keystore")
+  .setJksPass("changeit")
+val hc = H2OContext.getOrCreate(conf)
+```
+
+```python Python
+from pysparkling import *
+
+conf = H2OConf().setJks("/path/to/keystore").setJksPass("changeit")
+hc = H2OContext.getOrCreate(conf)
+```
+
+</CodeGroup>
+
+### Automatic HTTPS with self-signed certificates
+
+For quick testing, Sparkling Water can generate the keystore automatically:
+
+<CodeGroup>
+
+```bash spark-submit
+bin/sparkling-shell --conf "spark.ext.h2o.auto.flow.ssl=true"
+```
+
+```scala Scala
+import ai.h2o.sparkling._
+
+val conf = new H2OConf().setAutoFlowSslEnabled()
+val hc = H2OContext.getOrCreate(conf)
+```
+
+```python Python (disable cert verification for self-signed)
+from pysparkling import *
+
+conf = H2OConf().setAutoFlowSslEnabled().setVerifySslCertificates(False)
+hc = H2OContext.getOrCreate(conf)
+```
+
+</CodeGroup>
+
+<ParamField path="spark.ext.h2o.auto.flow.ssl" type="boolean" default="false">
+  Automatically generates a self-signed keystore and password to secure H2O Flow UI and internal REST connections. Hostname verification is disabled when using auto-generated certificates.
+
+  **H2OConf setters:** `setAutoFlowSslEnabled()`, `setAutoFlowSslDisabled()`
+</ParamField>
+
+### Certificate verification options
+
+<ParamField path="spark.ext.h2o.verify_ssl_certificates" type="boolean" default="true">
+  When enabled, PySparkling and RSparkling clients verify the server certificate when connecting to H2O Flow UI. Disable for self-signed certificates in development.
+
+  **H2OConf setter:** `setVerifySslCertificates(Boolean)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.internal.rest.verify_ssl_certificates" type="boolean" default="true">
+  Controls whether Sparkling Water verifies SSL certificates on internal REST connections (Flow UI proxy, Spark executor to H2O node). Disabling this also disables hostname verification.
+
+  **H2OConf setters:** `setSslCertificateVerificationInInternalRestConnectionsEnabled()`, `setSslCertificateVerificationInInternalRestConnectionsDisabled()`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.internal.rest.verify_ssl_hostnames" type="boolean" default="true">
+  Controls hostname verification on internal REST connections. Disable when the certificate covers only the Spark driver host but H2O nodes run on other hosts.
+
+  **H2OConf setters:** `setSslHostnameVerificationInInternalRestConnectionsEnabled()`, `setSslHostnameVerificationInInternalRestConnectionsDisabled()`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.ssl.ca.cert" type="string">
+  Path to a CA bundle file or directory of trusted CA certificates. Used by PySparkling and RSparkling when connecting to Sparkling Water with a custom CA-signed certificate.
+
+  **H2OConf setter:** `setSslCACert(String)`
+</ParamField>
+
+<Warning>
+Disabling certificate verification (`spark.ext.h2o.verify_ssl_certificates=false`) is safe only in development or test environments. Never disable it in production, as it removes protection against man-in-the-middle attacks.
+</Warning>
+
+  </Tab>
+  <Tab title="LDAP">
+
+## LDAP authentication
+
+Sparkling Water can delegate H2O Flow UI login to an LDAP server.
+
+### Setup
+
+<Steps>
+  <Step title="Create the login configuration file">
+    Create a `login.conf` file with your LDAP connection details:
+
+    ```xml login.conf
+    ldaploginmodule {
+        ai.h2o.org.eclipse.jetty.plus.jaas.spi.LdapLoginModule required
+        debug="true"
+        useLdaps="false"
+        contextFactory="com.sun.jndi.ldap.LdapCtxFactory"
+        hostname="ldap.example.com"
+        port="389"
+        bindDn="cn=admin,dc=example,dc=com"
+        bindPassword="secret"
+        authenticationMethod="simple"
+        forceBindingLogin="true"
+        userBaseDn="ou=users,dc=example,dc=com";
+    };
+    ```
+  </Step>
+  <Step title="Configure Sparkling Water">
+    Pass the LDAP properties to Sparkling Water:
+
+    <CodeGroup>
+
+    ```bash spark-submit
+    bin/sparkling-shell \
+      --conf spark.ext.h2o.ldap.login=true \
+      --conf spark.ext.h2o.login.conf=login.conf \
+      --conf spark.ext.h2o.user.name=myusername
+    ```
+
+    ```scala Scala
+    import ai.h2o.sparkling._
+
+    val conf = new H2OConf()
+      .setLoginConf("login.conf")
+      .setLdapLoginEnabled()
+      .setUserName("myusername")
+      .setPassword("mypassword")
+    val hc = H2OContext.getOrCreate(conf)
+    ```
+
+    ```python Python
+    from pysparkling import *
+
+    conf = H2OConf() \
+        .setLoginConf("login.conf") \
+        .setLdapLoginEnabled() \
+        .setUserName("myusername") \
+        .setPassword("mypassword")
+    hc = H2OContext.getOrCreate(conf)
+    ```
+
+    </CodeGroup>
+  </Step>
+  <Step title="Access Flow UI">
+    Navigate to the H2O Flow URL. You will be prompted for the username and password specified via `spark.ext.h2o.user.name` and `spark.ext.h2o.password`.
+  </Step>
+</Steps>
+
+<Note>
+PySparkling requires both `setUserName()` and `setPassword()` to authenticate the Python client against the H2O backend. Without these, the Python client itself cannot connect after LDAP is enabled.
+</Note>
+
+### LDAP configuration properties
+
+<ParamField path="spark.ext.h2o.ldap.login" type="boolean" default="false">
+  Enables LDAP authentication for the H2O Flow UI.
+
+  **H2OConf setters:** `setLdapLoginEnabled()`, `setLdapLoginDisabled()`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.login.conf" type="string">
+  Path to the JAAS login configuration file for LDAP or Kerberos.
+
+  **H2OConf setter:** `setLoginConf(String)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.user.name" type="string">
+  Username passed to the H2O backend. Also used to authenticate PySparkling and RSparkling clients.
+
+  **H2OConf setter:** `setUserName(String)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.password" type="string">
+  Password for authenticating the client against the H2O backend when a login method is enabled.
+
+  **H2OConf setter:** `setPassword(String)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.proxy.login.only" type="boolean" default="false">
+  Enables proxy-only login mode. In this mode, credentials are generated automatically for the cluster owner without requiring the password to be specified in configuration beforehand.
+
+  **H2OConf setters:** `setProxyLoginOnlyEnabled()`, `setProxyLoginOnlyDisabled()`
+</ParamField>
+
+  </Tab>
+  <Tab title="Kerberos">
+
+## Kerberos authentication
+
+Sparkling Water supports Kerberos for H2O Flow UI login and for running on Kerberized Hadoop clusters.
+
+### Kerberos login for Flow UI
+
+<Steps>
+  <Step title="Create the Kerberos login configuration file">
+    ```xml kerberos.conf
+    krb5loginmodule {
+        com.sun.security.auth.module.Krb5LoginModule required
+        java.security.krb5.realm="EXAMPLE.COM"
+        java.security.krb5.kdc="kerberos.example.com";
+    };
+    ```
+  </Step>
+  <Step title="Configure Sparkling Water">
+    <CodeGroup>
+
+    ```bash spark-submit
+    bin/sparkling-shell \
+      --conf spark.ext.h2o.kerberos.login=true \
+      --conf spark.ext.h2o.login.conf=kerberos.conf \
+      --conf spark.ext.h2o.user.name=myusername
+    ```
+
+    ```scala Scala
+    import ai.h2o.sparkling._
+
+    val conf = new H2OConf()
+      .setLoginConf("kerberos.conf")
+      .setKerberosLoginEnabled()
+      .setUserName("myusername")
+      .setPassword("mypassword")
+    val hc = H2OContext.getOrCreate(conf)
+    ```
+
+    ```python Python
+    from pysparkling import *
+
+    conf = H2OConf() \
+        .setLoginConf("kerberos.conf") \
+        .setKerberosLoginEnabled() \
+        .setUserName("myusername") \
+        .setPassword("mypassword")
+    hc = H2OContext.getOrCreate(conf)
+    ```
+
+    </CodeGroup>
+  </Step>
+</Steps>
+
+### Running on a Kerberized Hadoop cluster
+
+Sparkling Water supports both internal and external backend on a Kerberized YARN cluster.
+
+<Tabs>
+  <Tab title="With keytab">
+    Pass the Kerberos principal and keytab directly to `spark-submit`. Sparkling Water will propagate these to the external H2O cluster automatically.
+
+    ```bash
+    bin/sparkling-shell \
+      --conf "spark.yarn.principal=myuser@EXAMPLE.COM" \
+      --conf "spark.yarn.keytab=/path/to/myuser.keytab"
+    ```
+
+    In external backend mode, the values of `spark.yarn.principal` and `spark.yarn.keytab` are automatically mirrored to `spark.ext.h2o.external.kerberos.principal` and `spark.ext.h2o.external.kerberos.keytab`. You can also set these properties directly.
+  </Tab>
+  <Tab title="With kinit ticket">
+    If you have created a Kerberos ticket using `kinit` before submitting, no keytab configuration is needed:
+
+    ```bash
+    kinit myuser@EXAMPLE.COM
+    bin/sparkling-shell
+    ```
+
+    Sparkling Water picks up the existing ticket cache for both Spark and the external H2O cluster.
+  </Tab>
+</Tabs>
+
+### Kerberos configuration properties
+
+<ParamField path="spark.ext.h2o.kerberos.login" type="boolean" default="false">
+  Enables Kerberos authentication for H2O Flow UI.
+
+  **H2OConf setters:** `setKerberosLoginEnabled()`, `setKerberosLoginDisabled()`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.external.kerberos.principal" type="string">
+  Kerberos principal for the external H2O cluster. Automatically set from `spark.yarn.principal` when using YARN.
+
+  **H2OConf setter:** `setKerberosPrincipal(String)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.external.kerberos.keytab" type="string">
+  Path to the Kerberos keytab file for the external H2O cluster. Automatically set from `spark.yarn.keytab` when using YARN.
+
+  **H2OConf setter:** `setKerberosKeytab(String)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.kerberized.hive.enabled" type="boolean" default="false">
+  When enabled, H2O nodes establish JDBC connections to a Kerberized HiveServer2 so that H2O can read Hive data directly. Requires a Hive JDBC driver JAR on the Spark classpath.
+
+  **H2OConf setters:** `setKerberizedHiveEnabled()`, `setKerberizedHiveDisabled()`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.hive.host" type="string">
+  Full address of HiveServer2, for example `hiveserver.example.com:10000`. Required when `kerberized.hive.enabled=true`.
+
+  **H2OConf setter:** `setHiveHost(String)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.hive.principal" type="string">
+  Kerberos principal for HiveServer2, for example `hive/hiveserver.example.com@EXAMPLE.COM`.
+
+  **H2OConf setter:** `setHivePrincipal(String)`
+</ParamField>
+
+  </Tab>
+</Tabs>
+
+---
+
+## System-level enforcement (external backend on YARN)
+
+System administrators can enforce security settings for all external H2O clusters started by Sparkling Water on a YARN cluster by creating a central configuration file.
+
+<Steps>
+  <Step title="Create the configuration file">
+    Create `/etc/h2o/sparkling-water-external.args` on the system where the Sparkling Water driver runs.
+  </Step>
+  <Step title="Add enforced arguments">
+    Each argument must be on its own line. Example enforcing SSL on external H2O nodes:
+
+    ```text /etc/h2o/sparkling-water-external.args
+    h2o_ssl_jks_internal=keystore.jks
+    h2o_ssl_jks_password=changeit
+    h2o_ssl_jts_internal=truststore.jks
+    h2o_ssl_jts_password=changeit
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+Arguments in `/etc/h2o/sparkling-water-external.args` are applied to every externally started H2O cluster on that host. Ensure the keystore and truststore paths are accessible from the YARN container's working directory or use absolute paths.
+</Warning>
+
+---
+
+## Security property quick reference
+
+| Property | Default | Purpose |
+|---|---|---|
+| `spark.ext.h2o.internal_secure_connections` | `false` | Auto-generate SSL for inter-node H2O traffic |
+| `spark.ext.h2o.internal_security_conf` | — | Path to manual SSL properties file |
+| `spark.ext.h2o.jks` | — | Java keystore path for HTTPS Flow UI |
+| `spark.ext.h2o.jks.pass` | — | Keystore password |
+| `spark.ext.h2o.auto.flow.ssl` | `false` | Auto-generate self-signed cert for Flow UI |
+| `spark.ext.h2o.hash.login` | `false` | Enable hash-file-based login |
+| `spark.ext.h2o.ldap.login` | `false` | Enable LDAP login |
+| `spark.ext.h2o.kerberos.login` | `false` | Enable Kerberos login |
+| `spark.ext.h2o.pam.login` | `false` | Enable PAM login |
+| `spark.ext.h2o.login.conf` | — | Path to JAAS login config file |
+| `spark.ext.h2o.user.name` | — | Username for H2O backend auth |
+| `spark.ext.h2o.password` | — | Password for H2O backend auth |
+| `spark.ext.h2o.verify_ssl_certificates` | `true` | Client-side certificate verification |

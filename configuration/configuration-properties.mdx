@@ -1,0 +1,310 @@
+---
+title: "Configuration Properties"
+description: "Complete reference for Sparkling Water H2OConf configuration properties. Learn how to tune backend mode, networking, logging, and more via SparkConf or spark-submit."
+keywords: ["sparkling water", "H2OConf", "spark configuration", "h2o properties"]
+---
+
+Sparkling Water reads its configuration from the standard Spark configuration system. Every property can be set through `SparkConf`, passed as a `--conf` argument to `spark-submit`, or placed in `$SPARK_HOME/conf/spark-defaults.conf`. The `H2OConf` class provides a typed, fluent API over these raw key-value properties.
+
+## Setting properties
+
+<CodeGroup>
+
+```scala Scala (H2OConf)
+import ai.h2o.sparkling._
+
+val conf = new H2OConf()
+  .setInternalClusterMode()
+  .setCloudName("sparkling-cloud")
+  .setNthreads(4)
+  .setBasePort(54321)
+  .setLogLevel("WARN")
+  .setLogDir("/var/log/h2o")
+
+val hc = H2OContext.getOrCreate(conf)
+```
+
+```python Python (H2OConf)
+from pysparkling import *
+
+conf = H2OConf() \
+    .setInternalClusterMode() \
+    .setCloudName("sparkling-cloud") \
+    .setNthreads(4) \
+    .setBasePort(54321) \
+    .setLogLevel("WARN") \
+    .setLogDir("/var/log/h2o")
+
+hc = H2OContext.getOrCreate(conf)
+```
+
+```bash spark-submit
+bin/spark-submit \
+  --conf spark.ext.h2o.backend.cluster.mode=internal \
+  --conf spark.ext.h2o.cloud.name=sparkling-cloud \
+  --conf spark.ext.h2o.nthreads=4 \
+  --conf spark.ext.h2o.base.port=54321 \
+  --conf spark.ext.h2o.log.level=WARN \
+  --conf spark.ext.h2o.log.dir=/var/log/h2o \
+  my-app.jar
+```
+
+</CodeGroup>
+
+<Note>
+Properties set via `H2OConf` setters take effect at `H2OContext` creation time. Properties in `spark-defaults.conf` are the lowest precedence and can be overridden by `--conf` flags or programmatic setters.
+</Note>
+
+---
+
+## General properties
+
+<ParamField path="spark.ext.h2o.backend.cluster.mode" type="string" default="internal">
+  Controls whether H2O runs inside Spark executors (`internal`) or connects to a separately managed H2O cluster (`external`). Internal mode starts one H2O instance per Spark executor. External mode is recommended for large or production clusters where executor stability matters.
+
+  **Allowed values:** `internal`, `external`
+
+  **H2OConf setters:** `setInternalClusterMode()`, `setExternalClusterMode()`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.cloud.name" type="string">
+  Name of the H2O cluster. When not set, a name is generated automatically. Setting an explicit name is useful when multiple Sparkling Water clusters are running in the same environment.
+
+  **H2OConf setter:** `setCloudName(String)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.nthreads" type="number" default="-1">
+  Maximum number of threads used by H2O on each node.
+
+  - In internal backend: defaults to `spark.executor.cores` if set, otherwise uses `Runtime.getRuntime().availableProcessors()`.
+  - In auto-started external backend on Hadoop: defaults to `Runtime.getRuntime().availableProcessors()`.
+  - In auto-started external backend on Kubernetes: defaults to `1`.
+
+  **H2OConf setter:** `setNthreads(Integer)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.base.port" type="number" default="54321">
+  Base port used for H2O API (web) endpoints on each node. The internal communication port is calculated as `base_port + internal_port_offset`.
+
+  **H2OConf setter:** `setBasePort(Integer)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.internal.port.offset" type="number" default="1">
+  Offset added to the base port to derive the H2O internal communication port: `api_port + port_offset = h2o_port`.
+
+  **H2OConf setter:** `setInternalPortOffset(Integer)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.cloud.timeout" type="number" default="60000">
+  Timeout in milliseconds for H2O cluster formation. Increase this value when running on a large cluster where nodes take longer to register.
+
+  **H2OConf setter:** `setCloudTimeout(Integer)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.node.network.mask" type="string">
+  Subnet selector for H2O nodes running inside Spark executors. When set, Sparkling Water ignores the IP reported by Spark and finds an interface matching the mask. Useful in multi-homed environments.
+
+  **H2OConf setter:** `setNodeNetworkMask(String)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.extra.properties" type="string">
+  A raw string of extra command-line arguments forwarded to H2O nodes at startup. Use this only for H2O options that do not have a Sparkling Water equivalent.
+
+  **H2OConf setter:** `setExtraProperties(String)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.iced.dir" type="string">
+  Directory used by H2O nodes for persisting data (the "iced" directory). Defaults to a system temp location when not set.
+
+  **H2OConf setter:** `setIcedDir(String)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.rest.api.timeout" type="number" default="300000">
+  Timeout in milliseconds applied to REST API requests from the Sparkling Water client to H2O.
+
+  **H2OConf setter:** `setRestApiTimeout(Integer)`
+</ParamField>
+
+---
+
+## Logging properties
+
+<ParamField path="spark.ext.h2o.log.level" type="string" default="INFO">
+  Log level for H2O nodes. Accepts standard log4j level names: `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`, `FATAL`.
+
+  **H2OConf setter:** `setLogLevel(String)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.log.dir" type="string">
+  Directory where H2O log files are written. When not set, logs are placed in `{user.dir}/h2ologs/{AppId}` for standalone mode or in the YARN container directory for YARN deployments.
+
+  **H2OConf setter:** `setLogDir(String)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.stacktrace.collector.interval" type="number" default="-1">
+  Interval in milliseconds between stack trace captures on each H2O node. The value `-1` disables stack trace collection entirely.
+
+  **H2OConf setter:** `setStacktraceCollectorInterval(Integer)`
+</ParamField>
+
+---
+
+## Internal backend properties
+
+These properties apply only when `spark.ext.h2o.backend.cluster.mode=internal`.
+
+<ParamField path="spark.ext.h2o.cluster.size" type="number">
+  Expected number of H2O worker nodes. Defaults to automatic detection based on the number of running Spark executors. When `spark.executor.instances` is set, this property is automatically initialized to match it.
+
+  **H2OConf setter:** `setNumH2OWorkers(Integer)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.extra.cluster.nodes" type="boolean" default="false">
+  When `true` and Sparkling Water detects more executors than `spark.ext.h2o.cluster.size` specifies, H2O nodes are deployed to all discovered executors. When `false`, only the configured count of executors receive H2O nodes.
+
+  **H2OConf setters:** `setExtraClusterNodesEnabled()`, `setExtraClusterNodesDisabled()`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.default.cluster.size" type="number" default="20">
+  Starting cluster size estimate when the size is not explicitly configured. Used to pre-allocate the spread RDD.
+
+  **H2OConf setter:** `setDefaultCloudSize(Integer)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.spreadrdd.retries" type="number" default="10">
+  Number of retries when creating the spread RDD used to assign H2O nodes to Spark executors.
+
+  **H2OConf setter:** `setNumRddRetries(Integer)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.spreadrdd.retries.timeout" type="number" default="0">
+  How long in milliseconds Sparkling Water should keep trying to discover Spark executors. When non-zero, this takes precedence over retry count, which is useful when executors may start with a delay (e.g., spot/preemptible nodes).
+
+  **H2OConf setter:** `setSpreadRddRetriesTimeout(Integer)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.hdfs_conf" type="string">
+  Path to a Hadoop HDFS configuration XML file. Used for HDFS credential and configuration settings when the default `sc.hadoopConfig` is insufficient.
+
+  **H2OConf setter:** `setHdfsConf(String)`
+</ParamField>
+
+---
+
+## External backend properties
+
+These properties apply only when `spark.ext.h2o.backend.cluster.mode=external`.
+
+<ParamField path="spark.ext.h2o.external.cluster.size" type="number">
+  Number of H2O nodes to start when using `auto` start mode on YARN or Kubernetes.
+
+  **H2OConf setter:** `setClusterSize(Integer)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.external.memory" type="string" default="6G">
+  Memory allocated to each external H2O node. Accepts Spark-style size strings such as `6G`, `8192m`.
+
+  **H2OConf setter:** `setExternalMemory(String)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.external.start.mode" type="string" default="manual">
+  Controls how the external H2O cluster is started. In `auto` mode, Sparkling Water launches the cluster on YARN or Kubernetes using the provided H2O driver JAR. In `manual` mode, the cluster must already be running.
+
+  **Allowed values:** `auto`, `manual`
+
+  **H2OConf setters:** `useAutoClusterStart()`, `useManualClusterStart()`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.cloud.representative" type="string">
+  `host:port` of the H2O cluster leader node. Required when using `manual` start mode to connect to an already-running external cluster.
+
+  **H2OConf setter:** `setH2OCluster(String)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.external.h2o.driver" type="string">
+  Path to the H2O driver JAR used when starting the external backend in `auto` mode on YARN.
+
+  **H2OConf setter:** `setH2ODriverPath(String)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.external.yarn.queue" type="string">
+  YARN queue where the external H2O cluster is submitted in `auto` start mode.
+
+  **H2OConf setter:** `setYARNQueue(String)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.external.extra.memory.percent" type="number" default="10">
+  Percentage of `spark.ext.h2o.external.memory` reserved for JVM overhead outside the Java heap on external H2O nodes.
+
+  **H2OConf setter:** `setExternalExtraMemoryPercent(Integer)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.cluster.start.timeout" type="number" default="120">
+  Timeout in seconds for the external H2O cluster to become fully formed before Sparkling Water gives up.
+
+  **H2OConf setter:** `setClusterStartTimeout(Integer)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.external.kill.on.unhealthy" type="boolean" default="true">
+  When `true`, the client attempts to kill the cluster and exit if any node reports an unhealthy status.
+
+  **H2OConf setters:** `setKillOnUnhealthyClusterEnabled()`, `setKillOnUnhealthyClusterDisabled()`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.external.communication.compression" type="string" default="SNAPPY">
+  Compression algorithm for data transferred between Spark and external H2O nodes.
+
+  **Allowed values:** `NONE`, `DEFLATE`, `GZIP`, `SNAPPY`
+
+  **H2OConf setter:** `setExternalCommunicationCompression(String)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.external.backend.stop.timeout" type="number" default="10000">
+  Timeout in milliseconds to wait for confirmation from worker nodes when stopping the external backend. Pass `-1` for an indefinite timeout.
+
+  **H2OConf setter:** `setExternalBackendStopTimeout(Integer)`
+</ParamField>
+
+---
+
+## Flow UI properties
+
+<ParamField path="spark.ext.h2o.flow.dir" type="string">
+  Directory where H2O Flow notebooks are saved.
+
+  **H2OConf setter:** `setFlowDir(String)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.context.path" type="string">
+  Context path prefix used when exposing the H2O web server.
+
+  **H2OConf setter:** `setContextPath(String)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.flow.extra.http.headers" type="string">
+  Newline-delimited extra HTTP headers added to all requests between the Flow UI front-end and back-end. Example: `Strict-Transport-Security:max-age=31536000`.
+
+  **H2OConf setter:** `setFlowExtraHttpHeaders(String)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.client.flow.baseurl.override" type="string">
+  Overrides the base URL shown to users for the H2O Flow UI, including the scheme. Useful when Sparkling Water sits behind a reverse proxy.
+
+  **H2OConf setter:** `setClientFlowBaseurlOverride(String)`
+</ParamField>
+
+---
+
+## REPL and MOJO properties
+
+<ParamField path="spark.ext.h2o.repl.enabled" type="boolean" default="true">
+  Enables the H2O Scala REPL inside Sparkling Water.
+
+  **H2OConf setters:** `setReplEnabled()`, `setReplDisabled()`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.mojo.destroy.timeout" type="number" default="600000">
+  Milliseconds of inactivity after which a cached scoring MOJO instance is evicted from an executor's memory. Default is 10 minutes.
+
+  **H2OConf setter:** `setMojoDestroyTimeout(Integer)`
+</ParamField>

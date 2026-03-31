@@ -1,0 +1,179 @@
+---
+title: "Memory Configuration"
+description: "Configure memory allocation for Sparkling Water, covering Spark executor memory, H2O off-heap considerations, external backend memory, and YARN-specific tuning."
+keywords: ["sparkling water memory", "spark executor memory", "h2o memory", "OOM", "YARN memory"]
+---
+
+H2O runs inside the same executor JVM as Spark. Memory available to H2O is controlled through Spark's standard configuration properties — there is no separate H2O memory allocation mechanism in internal backend mode.
+
+## Executor and driver memory
+
+<ParamField path="spark.executor.memory" type="string">
+  Total JVM heap memory allocated to each Spark executor. H2O shares this heap. Set this to the combined amount you want available to both Spark and H2O tasks.
+
+  Example: `--conf spark.executor.memory=8g`
+</ParamField>
+
+<ParamField path="spark.driver.memory" type="string">
+  JVM heap memory for the Spark driver process. In Sparkling Water, the H2O client node also runs in the driver JVM, so allocate enough memory for both.
+
+  Example: `--conf spark.driver.memory=4g`
+</ParamField>
+
+<Tip>
+For stable operation, use identical values for driver and executor memory to make the cluster homogeneous. H2O's distributed algorithms perform best when all nodes have the same memory footprint.
+</Tip>
+
+### Example spark-submit with memory settings
+
+```bash
+bin/spark-submit \
+  --master yarn \
+  --deploy-mode cluster \
+  --num-executors 4 \
+  --executor-cores 4 \
+  --executor-memory 10g \
+  --driver-memory 6g \
+  --conf spark.ext.h2o.backend.cluster.mode=internal \
+  my-sparkling-app.jar
+```
+
+---
+
+## External backend memory
+
+When running in external backend mode, H2O nodes are managed separately from Spark executors. Use `spark.ext.h2o.external.memory` to control how much memory each external H2O node receives.
+
+<ParamField path="spark.ext.h2o.external.memory" type="string" default="6G">
+  Memory allocated to each external H2O node when started via `auto` mode on YARN or Kubernetes. Accepts Spark-style size strings such as `6G` or `8192m`.
+
+  **H2OConf setter:** `setExternalMemory(String)`
+</ParamField>
+
+<ParamField path="spark.ext.h2o.external.extra.memory.percent" type="number" default="10">
+  Percentage of `spark.ext.h2o.external.memory` reserved for JVM overhead outside the Java heap (equivalent to YARN's `memoryOverhead`). Default is 10%.
+
+  **H2OConf setter:** `setExternalExtraMemoryPercent(Integer)`
+</ParamField>
+
+```bash External backend with explicit memory
+bin/spark-submit \
+  --master yarn \
+  --conf spark.ext.h2o.backend.cluster.mode=external \
+  --conf spark.ext.h2o.external.start.mode=auto \
+  --conf spark.ext.h2o.external.cluster.size=3 \
+  --conf spark.ext.h2o.external.memory=12G \
+  --conf spark.ext.h2o.external.extra.memory.percent=15 \
+  my-sparkling-app.jar
+```
+
+---
+
+## Internal backend tuning
+
+For internal backend deployments, the following Spark properties accelerate and stabilize H2O service creation. Apply them alongside your memory settings.
+
+### All environments (standalone, local, YARN)
+
+| Property | Recommended value | Reason |
+|---|---|---|
+| `spark.locality.wait` | `3000` | Increases wait time for data-local task placement, ensuring H2O tasks run close to their data. |
+| `spark.scheduler.minRegisteredResourcesRatio` | `1` | Prevents Spark from scheduling until 100% of executors have registered. |
+| `spark.task.maxFailures` | `1` | Disables task retries; a failed H2O node should not be silently restarted. |
+| `spark.executor.heartbeatInterval` | `10s` | Must be significantly shorter than `spark.network.timeout`. |
+
+### YARN-specific settings
+
+| Property | Recommended value | Reason |
+|---|---|---|
+| `spark.dynamicAllocation.enabled` | `false` | Dynamic allocation is incompatible with H2O's fixed-topology cluster. |
+| `spark.yarn.heterogeneousExecutors.enabled` | `false` | Heterogeneous executors (enabled by default on some EMR versions) can cause H2O node mismatches. |
+| `spark.yarn.max.executor.failures` | `1` | Prevents YARN from restarting failed executor containers; fail fast instead. |
+
+<Warning>
+Do not use a preemptive YARN scheduler with Sparkling Water. Preemption can terminate H2O nodes mid-computation, causing unrecoverable cluster failures. Use a capacity or fair scheduler configured to avoid preemption of long-running applications.
+</Warning>
+
+### Java 7 PermGen settings
+
+If you are running on Java 7, increase PermGen size to avoid `OutOfMemoryError: PermGen space`:
+
+```bash Java 7 PermGen configuration
+bin/spark-submit \
+  --conf "spark.driver.extraJavaOptions=-XX:MaxPermSize=384m" \
+  --conf "spark.executor.extraJavaOptions=-XX:MaxPermSize=384m" \
+  --conf "spark.yarn.am.extraJavaOptions=-XX:MaxPermSize=384m" \
+  my-sparkling-app.jar
+```
+
+---
+
+## YARN memory overhead
+
+For large-memory JVMs on YARN, increase the memory overhead to prevent container eviction:
+
+<ParamField path="spark.yarn.driver.memoryOverhead" type="string">
+  Off-heap memory overhead for the driver container on YARN. Increase when driver OOM errors occur outside the heap (e.g., native libraries, direct buffers).
+</ParamField>
+
+<ParamField path="spark.yarn.executor.memoryOverhead" type="string">
+  Off-heap memory overhead for executor containers on YARN. Increase when executors are killed by the NodeManager for exceeding physical memory limits.
+</ParamField>
+
+<ParamField path="spark.yarn.am.memoryOverhead" type="string">
+  Off-heap memory overhead for the YARN application master container.
+</ParamField>
+
+```bash YARN memory overhead example
+bin/spark-submit \
+  --master yarn \
+  --executor-memory 12g \
+  --conf spark.yarn.executor.memoryOverhead=2048 \
+  --conf spark.yarn.driver.memoryOverhead=1024 \
+  my-sparkling-app.jar
+```
+
+<Tip>
+A common starting point for `memoryOverhead` is 10-15% of the JVM heap size, with a minimum of 384 MB. Increase if you observe YARN container kills with physical memory exceeded messages.
+</Tip>
+
+---
+
+## Common OOM scenarios
+
+<Warning>
+**Executor heap exhaustion** — H2O and Spark share the executor heap. If Spark is performing shuffle-heavy operations concurrently with H2O model training, both can compete for the same memory pool. Either increase `spark.executor.memory` or stagger the workloads.
+</Warning>
+
+<Warning>
+**Driver OOM with large datasets** — Converting a large H2O frame to a Spark DataFrame may temporarily materialize data in driver memory. Increase `spark.driver.memory` and consider using chunked conversion patterns if you encounter driver-side OOM errors.
+</Warning>
+
+<Warning>
+**YARN container eviction** — If YARN kills executors with a "Container killed on request" or "Container is running beyond physical memory limits" message, the JVM is exceeding its physical memory limit (heap + overhead). Increase `spark.yarn.executor.memoryOverhead` rather than just the heap.
+</Warning>
+
+---
+
+## Full example: production YARN cluster
+
+```bash Production YARN submit with memory tuning
+bin/spark-submit \
+  --master yarn \
+  --deploy-mode cluster \
+  --num-executors 8 \
+  --executor-cores 4 \
+  --executor-memory 16g \
+  --driver-memory 8g \
+  --conf spark.yarn.executor.memoryOverhead=2048 \
+  --conf spark.yarn.driver.memoryOverhead=1024 \
+  --conf spark.locality.wait=3000 \
+  --conf spark.scheduler.minRegisteredResourcesRatio=1 \
+  --conf spark.task.maxFailures=1 \
+  --conf spark.dynamicAllocation.enabled=false \
+  --conf spark.yarn.heterogeneousExecutors.enabled=false \
+  --conf spark.yarn.max.executor.failures=1 \
+  --conf spark.ext.h2o.backend.cluster.mode=internal \
+  --conf spark.ext.h2o.log.level=WARN \
+  my-sparkling-app.jar
+```

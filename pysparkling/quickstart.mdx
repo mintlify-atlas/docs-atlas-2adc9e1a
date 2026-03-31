@@ -1,0 +1,287 @@
+---
+title: "PySparkling Quickstart"
+description: "Get a PySparkling session running, train your first model, and score predictions — from local mode to YARN, Databricks, and Jupyter."
+keywords: ["pysparkling", "quickstart", "h2ocontext", "h2oconf", "jupyter", "databricks", "yarn"]
+---
+
+This guide walks you through launching PySparkling, initializing an H2O cluster inside Spark, and running a complete train-and-predict workflow.
+
+## Prerequisites
+
+- Apache Spark installed and `SPARK_HOME` pointing to its location
+- PySparkling installed for your Spark version (see [PySparkling Overview](/pysparkling/overview))
+- Python 3.6 or higher
+
+## Core workflow
+
+<Steps>
+  <Step title="Create a SparkSession">
+    Every PySparkling program starts with a standard PySpark `SparkSession`. PySparkling attaches to whatever session already exists in your process — in interactive shells, `spark` is pre-created for you.
+
+    ```python
+    from pyspark.sql import SparkSession
+
+    spark = SparkSession.builder \
+        .appName("MyPySparklingApp") \
+        .getOrCreate()
+    ```
+  </Step>
+
+  <Step title="Initialize H2OContext">
+    Import the `H2OContext` class from `pysparkling` and call `getOrCreate()`. This starts an H2O node inside each Spark executor JVM and returns a handle to the running H2O cluster.
+
+    ```python
+    from pysparkling import H2OContext
+
+    hc = H2OContext.getOrCreate()
+    ```
+
+    After this call succeeds, a line similar to the following is printed to your console showing the H2O Flow UI address:
+
+    ```
+    H2OContext: ip=..., port=54321, ...
+    ```
+
+    <Note>
+      `getOrCreate()` is idempotent. Calling it multiple times in the same session returns the existing `H2OContext` rather than starting a second cluster.
+    </Note>
+  </Step>
+
+  <Step title="Load data as a Spark DataFrame">
+    PySparkling works with standard Spark DataFrames. Load your data the usual way:
+
+    ```python
+    df = spark.read.csv("data/my_dataset.csv", header=True, inferSchema=True)
+    ```
+  </Step>
+
+  <Step title="Train an H2O model via the Sparkling Water ML API">
+    Import an algorithm from `pysparkling.ml`, configure it, and call `fit()` on a Spark DataFrame. The result is a Spark ML-compatible model that wraps an H2O MOJO internally.
+
+    ```python
+    from pysparkling.ml import H2OGBM
+
+    gbm = H2OGBM(
+        featuresCols=["col1", "col2", "col3"],
+        labelCol="target",
+        ntrees=50,
+        maxDepth=5,
+        learnRate=0.1,
+        splitRatio=0.8,
+        seed=42
+    )
+
+    model = gbm.fit(df)
+    ```
+  </Step>
+
+  <Step title="Score predictions">
+    Call `transform()` on a Spark DataFrame to obtain predictions. The output is a new DataFrame with a `prediction` column appended.
+
+    ```python
+    predictions = model.transform(df)
+    predictions.select("target", "prediction").show(10)
+    ```
+  </Step>
+
+  <Step title="Stop H2O and Spark">
+    When you are done, shut down H2O and stop the Spark session:
+
+    ```python
+    import h2o
+    h2o.cluster().shutdown()
+    spark.stop()
+    ```
+  </Step>
+</Steps>
+
+## Launch environments
+
+<Tabs>
+  <Tab title="Local (pysparkling shell)">
+    The `bin/pysparkling` script is the easiest way to start an interactive PySparkling session. It is a thin wrapper around `bin/pyspark` that puts PySparkling on the Python path.
+
+    **Setup**
+
+    Download and unpack a Sparkling Water release, then set the required environment variables:
+
+    ```bash
+    export SPARK_HOME="/path/to/spark"
+    export MASTER="local[*]"
+    ```
+
+    **Start the shell**
+
+    ```bash
+    bin/pysparkling
+    ```
+
+    The shell accepts the same arguments as `pyspark` (e.g., `--executor-memory`, `--num-executors`).
+
+    **Inside the shell**, `spark` is already available. Start H2O:
+
+    ```python
+    from pysparkling import *
+    import h2o
+
+    hc = H2OContext.getOrCreate()
+    ```
+
+    <Tip>
+      Pass `--master yarn` or `--master spark://host:7077` to the shell to run on a real cluster instead of local mode.
+    </Tip>
+  </Tab>
+
+  <Tab title="YARN">
+    Run PySparkling on a YARN cluster by setting the master when launching the shell or submitting a script.
+
+    **Interactive shell on YARN**
+
+    ```bash
+    export SPARK_HOME="/path/to/spark"
+    export HADOOP_CONF_DIR="/etc/hadoop/conf"
+
+    bin/pysparkling \
+        --master yarn \
+        --deploy-mode client \
+        --num-executors 4 \
+        --executor-memory 4g
+    ```
+
+    **Submitting a script**
+
+    ```bash
+    spark-submit \
+        --master yarn \
+        --deploy-mode client \
+        --py-files py/h2o_pysparkling_3.5-*.zip \
+        my_pysparkling_script.py
+    ```
+
+    Inside the script, initialize PySparkling the same way as local mode:
+
+    ```python
+    from pyspark.sql import SparkSession
+    from pysparkling import H2OContext
+
+    spark = SparkSession.builder.appName("YARNApp").getOrCreate()
+    hc = H2OContext.getOrCreate()
+    ```
+
+    <Warning>
+      On YARN, ensure the Sparkling Water jar and PySparkling zip are distributed to all nodes. When using `bin/pysparkling`, this is handled automatically. When using `spark-submit` directly, pass `--py-files` with the PySparkling zip.
+    </Warning>
+  </Tab>
+
+  <Tab title="Jupyter / IPython">
+    Launch a Jupyter notebook backed by PySparkling using the `PYSPARK_DRIVER_PYTHON` environment variables.
+
+    **Linux / macOS**
+
+    ```bash
+    export SPARK_HOME="/path/to/spark"
+    export MASTER="local[*]"
+
+    PYSPARK_DRIVER_PYTHON="jupyter" \
+    PYSPARK_DRIVER_PYTHON_OPTS="notebook" \
+    bin/pysparkling
+    ```
+
+    **Windows**
+
+    ```bat
+    SET PYSPARK_DRIVER_PYTHON=jupyter
+    SET PYSPARK_DRIVER_PYTHON_OPTS=notebook
+    bin/pysparkling
+    ```
+
+    **IPython REPL only**
+
+    ```bash
+    PYSPARK_DRIVER_PYTHON="ipython" bin/pysparkling
+    ```
+
+    Once the notebook server is running, create a new notebook and initialize the context:
+
+    ```python
+    from pysparkling import H2OContext
+    import h2o
+
+    hc = H2OContext.getOrCreate()
+    print(hc)
+    ```
+  </Tab>
+
+  <Tab title="Databricks">
+    PySparkling runs on Databricks clusters. The easiest approach is to install from PyPI directly into the cluster.
+
+    **Steps to set up a Databricks cluster**
+
+    1. Open your Databricks workspace and go to **Clusters**.
+    2. Create a new cluster and select a supported Spark version.
+    3. Under **Libraries**, click **Install New**, choose **PyPI** as the source, and enter:
+       ```
+       h2o_pysparkling_3.5
+       ```
+       Replace `3.5` with the Spark version used by your cluster. Databricks resolves dependencies automatically.
+    4. Attach the library to the cluster. Restart the cluster if it was already running.
+
+    **Notebook initialization**
+
+    Create a Python notebook attached to the cluster. The `spark` session is pre-created by Databricks:
+
+    ```python
+    from pysparkling import *
+
+    hc = H2OContext.getOrCreate()
+    ```
+
+    After the cell executes, the H2O Flow UI URL is printed. You can access it from the URL shown in the output.
+
+    <Note>
+      By default, H2O Flow listens on port 9009 inside the Databricks cluster. If that port is not open in your environment, configure it with `H2OConf` before calling `getOrCreate()`:
+
+      ```python
+      from pysparkling import H2OConf, H2OContext
+
+      conf = H2OConf().setClientWebPort(9010)
+      hc = H2OContext.getOrCreate(conf)
+      ```
+    </Note>
+  </Tab>
+</Tabs>
+
+## Configuring H2O with H2OConf
+
+`H2OConf` lets you tune H2O settings before starting the cluster. Pass the configured object to `H2OContext.getOrCreate()`:
+
+```python
+from pysparkling import H2OConf, H2OContext
+
+conf = (H2OConf()
+    .setClusterSize(4)
+    .setClientWebPort(54321)
+    .setLogLevel("WARN"))
+
+hc = H2OContext.getOrCreate(conf)
+```
+
+`H2OConf` reads its defaults from the active `SparkSession` configuration, so any properties set via `spark.conf.set("spark.ext.h2o.*", ...)` are automatically picked up.
+
+## Converting data between Spark and H2O
+
+Once `H2OContext` is running you can move data freely between the two frameworks:
+
+```python
+import h2o
+
+# Spark DataFrame → H2OFrame (performs a data copy)
+h2o_frame = hc.asH2OFrame(spark_df, "myFrame")
+
+# Manipulate with H2O Python API
+h2o_frame["label"] = h2o_frame["label"].asfactor()
+
+# H2OFrame → Spark DataFrame (zero-copy wrapper)
+spark_df_back = hc.asSparkFrame(h2o_frame)
+spark_df_back.show(5)
+```
